@@ -139,6 +139,13 @@ pub fn launch(app: AppHandle) {
         .spawn(move || {
             if let Err(error) = run(&app) {
                 eprintln!("[dsh-tauri] bridge failed: {error}");
+                let handle = app.clone();
+                let message = error.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if let Err(error) = crate::shell_ui::build_error_window(&handle, &message) {
+                        eprintln!("[dsh-tauri] cannot show the error window: {error}");
+                    }
+                });
             }
         })
         .expect("spawning the bridge thread");

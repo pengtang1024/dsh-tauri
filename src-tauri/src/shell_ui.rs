@@ -161,6 +161,32 @@ fn show_main_window(app: &AppHandle<Wry>) {
     }
 }
 
+/// Explain a fatal startup problem in a real window: a console-only message
+/// looks like the application never launched.
+pub fn build_error_window(app: &AppHandle<Wry>, message: &str) -> Result<WebviewWindow<Wry>, String> {
+    let encoded = urlencoding(message);
+    WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(format!("error.html#{encoded}").into()))
+        .title("DSH Tauri")
+        .inner_size(760.0, 520.0)
+        .min_inner_size(520.0, 380.0)
+        .build()
+        .map_err(|error| format!("cannot open the error window: {error}"))
+}
+
+/** Percent-encode a message so it survives the fragment of a local document. */
+fn urlencoding(message: &str) -> String {
+    let mut encoded = String::with_capacity(message.len());
+    for byte in message.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' | b' ' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}"))
+        }
+    }
+    encoded
+}
+
 /// Build the main window with the remembered geometry and shared menu.
 pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<WebviewWindow<Wry>, String> {
     let state = load_window_state();

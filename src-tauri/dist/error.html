@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>DSH Tauri</title>
+    <style>
+      :root { color-scheme: dark }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        background: #0b0d12; color: #e6e8ee;
+        font: 15px/1.65 ui-sans-serif, system-ui, "Noto Sans SC", sans-serif;
+      }
+      main { max-width: 620px; padding: 32px }
+      h1 { margin: 0 0 12px; font-size: 19px; font-weight: 600 }
+      p { margin: 0 0 14px; color: #a8b0c0 }
+      pre {
+        margin: 18px 0 0; padding: 14px 16px; overflow: auto; white-space: pre-wrap;
+        background: #12151d; border: 1px solid #1e232e; border-radius: 10px;
+        color: #d7dcea; font: 13px/1.5 ui-monospace, "JetBrains Mono", monospace;
+      }
+      code { background: #1a1f2a; padding: 1px 6px; border-radius: 5px; font-size: 13px }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>没有找到可用的 DSH Desktop 安装</h1>
+      <p>这个外壳复用官方安装里的 Node 运行时，所以需要先装好 DSH Desktop；装好后再启动即可。</p>
+      <p>如果装在了非默认位置，用 <code>DSH_TAURI_APP_ROOT</code> 指向它的 <code>resources/app.asar</code>。</p>
+      <pre id="detail"></pre>
+    </main>
+    <script>
+      const detail = decodeURIComponent(location.hash.slice(1));
+      document.getElementById('detail').textContent = detail || 'unknown error';
+    </script>
+  </body>
+</html>
