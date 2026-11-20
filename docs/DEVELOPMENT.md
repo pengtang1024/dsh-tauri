@@ -52,3 +52,15 @@ Host 退出时会随 `exit` 事件一起上报。
 
 `npm run build` 之后产物在 `src-tauri/target/release/bundle/{deb,appimage}/`。
 CI（`.github/workflows/build.yml`）在每次 push 上跑同样的命令并把两个包作为 artifact 上传。
+
+## 单实例与崩溃恢复
+
+- `src-tauri/src/single_instance.rs`：在 `$XDG_RUNTIME_DIR/dsh-tauri.sock` 上监听。第二次启动
+  连上该 socket 发 `focus` 后 `exit(0)`；主实例收到后显示/取消最小化/聚焦主窗。socket 随进程
+  消失，残留文件在下次启动时被重新接管。
+- `bridge.rs` 的 `run()` 在 Host 意外退出时最多重启 3 次（间隔 2s），每次重新 spawn bridge；
+  超限则弹错误窗口（`shell_ui::build_error_window`）。托盘「退出」走 `bridge::shutdown()`，
+  置 `SHUTTING_DOWN` 后不再重启。
+- 注意：Host 被 `SIGKILL` 后立刻重启可能因 profile 里的残留状态启动失败（日志里是
+  `CordisError: cannot create effect on inactive context` + `authentication failed (status 404)`），
+  此时再启动一次应用即可恢复。

@@ -3,10 +3,15 @@
 
 mod bridge;
 mod shell_ui;
+mod single_instance;
 
 fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
+            if !single_instance::claim(app.handle()) {
+                // The primary instance is already up: it just focused itself.
+                std::process::exit(0);
+            }
             let handle = app.handle().clone();
             if let Err(error) = shell_ui::install_tray(&handle) {
                 // A tray is nice to have: a headless session must not lose the app.

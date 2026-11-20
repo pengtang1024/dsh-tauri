@@ -9,6 +9,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::Value;
@@ -23,6 +24,7 @@ struct Session {
 static SESSION: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 /// Origins learned from the Host's `ready` event: the loopback proxy the window
 /// loads, and the Host origin that Platform sign-in callbacks belong to.
+static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static PROXY_ORIGIN: Mutex<Option<String>> = Mutex::new(None);
 static HOST_ORIGIN: Mutex<Option<String>> = Mutex::new(None);
 
@@ -183,6 +185,38 @@ pub fn launch(app: AppHandle) {
 }
 
 fn run(app: &AppHandle) -> Result<(), String> {
+    // The Host is a child process: it can die (a plugin crash, an OOM, a bad
+    // update). Restart it a few times before giving up and telling the user.
+    let mut attempt = 0u32;
+    loop {
+        let reason = run_once(app);
+        attempt += 1;
+        if SHUTTING_DOWN.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let Some(reason) = reason? else { return Ok(()) };
+        eprintln!("[dsh-tauri] host exited unexpectedly ({reason}), restart {attempt}/3");
+        if attempt >= 3 {
+            let handle = app.clone();
+            let message = format!("DSH 进程反复退出：{reason}\n\n请重启应用；如果仍然失败，查看终端输出的 Host 日志。");
+            let _ = app.run_on_main_thread(move || {
+                let _ = crate::shell_ui::build_error_window(&handle, &message);
+            });
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        // Drop the dead session so the next launch installs a fresh one.
+        if let Some(slot) = SESSION.get() {
+            if let Ok(mut guard) = slot.lock() {
+                *guard = None;
+            }
+        }
+    }
+}
+
+/// Start the bridge and pump its events. Returns `Some(reason)` when the Host
+/// exited on its own, `None` when this was an orderly shutdown.
+fn run_once(app: &AppHandle) -> Result<Option<String>, String> {
     let config = Config::resolve(Some(app))?;
     let mut command = Command::new(&config.node);
     command
@@ -245,11 +279,19 @@ fn run(app: &AppHandle) -> Result<(), String> {
             }
             Some("error") => eprintln!("[dsh-tauri] bridge: {}", event.get("message").and_then(Value::as_str).unwrap_or("unknown error")),
             Some("title") => set_window_title(app, event.get("title").and_then(Value::as_str).unwrap_or("")),
-            Some("exit") => break,
+            Some("exit") => {
+                let code = event.get("code").and_then(Value::as_i64);
+                let signal = event.get("signal").and_then(Value::as_str);
+                return Ok(Some(match (code, signal) {
+                    (Some(code), _) => format!("exit code {code}"),
+                    (None, Some(signal)) => format!("signal {signal}"),
+                    _ => "unknown exit".to_owned()
+                }));
+            }
             _ => {}
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// React to Host events that need shell furniture rather than the WebView.
@@ -386,6 +428,7 @@ pub fn send(message: &Value) -> Result<(), String> {
 
 /// Stop the bridge (and therefore the Host) if it is still running.
 pub fn shutdown() {
+    SHUTTING_DOWN.store(true, Ordering::Relaxed);
     let Some(lock) = SESSION.get() else { return };
     let Ok(mut guard) = lock.lock() else { return };
     let Some(mut session) = guard.take() else { return };

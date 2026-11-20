@@ -111,6 +111,9 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 - 反向代理：`GET /` 200 且是真客户端 HTML；`/plugins/**` 不缓存；
 - WebSocket：`/api/remote.mux` 经代理返回 **101** 并保持长连接（会话与终端流实时刷新）；
 - 桌面模式：`dshDesktopBoot.ready()` 打通，`__DSH_TRANSPORT__.ownsHost` 生效；
+- 单实例：第二次启动会把已有窗口提到前台后退出（`$XDG_RUNTIME_DIR/dsh-tauri.sock`），
+  不会在同一 profile 上再起第二个 Host；
+- Host 意外退出（被杀、崩溃）时自动重启，最多 3 次，仍失败则弹错误窗口说明原因；
 - 平台登录：Host 发来 `platform-login{action:open}` 时开登录窗；登录窗跳回 Host 的
   `/oauth/callback` 时由 bridge 以原生渲染器身份经代理重放（实测回调 404 → 窗口自动关闭）；
 - 窗口标题跟随文档标题（`document.title` → 原生标题栏，实测从 `DSH` 变为 `DeepSeek Harness`）；
@@ -131,6 +134,7 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 | 桌面引导 / 首次运行迁移（`dshDesktop`、`dshDesktopSetup`） | 未实现：登录走网页流程，客户端有回退路径 |
 | 应用内账号子窗（`dshPlatform` + 凭据注入） | 未实现，见上一条 |
 | 自动更新 | 未实现，建议随官方安装一起升级 |
+| 桌面引导 / 迁移（`dshDesktopSetup`） | 未实现；已有 profile 直接可用，迁移流程建议在官方桌面完成一次 |
 
 ## 说明
 
