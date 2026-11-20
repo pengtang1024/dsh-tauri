@@ -64,6 +64,19 @@ sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential
 ```
 
+## 安装
+
+从 [Releases](https://github.com/pengtang1024/dsh-tauri/releases) 取构建好的包：
+
+```bash
+sudo dpkg -i "DSH.Tauri_0.1.0_amd64.deb"     # Debian/Ubuntu
+# 或者直接运行 AppImage
+chmod +x "DSH.Tauri_0.1.0_amd64.AppImage" && "./DSH.Tauri_0.1.0_amd64.AppImage"
+```
+
+前置条件只有一个：本机已安装 DSH Desktop（外壳复用它的 Node 运行时与 profile）。
+卸载 `sudo dpkg -r dsh-tauri`；首次启动会读取 `~/.dsh/desktop-preferences.json`。
+
 ## 构建与运行
 
 ```bash
