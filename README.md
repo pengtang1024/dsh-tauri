@@ -1,5 +1,7 @@
 # dsh-tauri
 
+[![build](https://github.com/pengtang1024/dsh-tauri/actions/workflows/build.yml/badge.svg)](https://github.com/pengtang1024/dsh-tauri/actions/workflows/build.yml)
+
 用 **Tauri 2** 重做的 DeepSeek Harness Desktop 外壳：窗口与原生能力由 Rust + 系统 WebView 提供，
 内核仍然是官方那套 Node `@deepseek-ai/*` 运行时——不重写它，也不复制它。
 
