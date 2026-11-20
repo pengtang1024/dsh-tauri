@@ -111,6 +111,7 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 - 反向代理：`GET /` 200 且是真客户端 HTML；`/plugins/**` 不缓存；
 - WebSocket：`/api/remote.mux` 经代理返回 **101** 并保持长连接（会话与终端流实时刷新）；
 - 桌面模式：`dshDesktopBoot.ready()` 打通，`__DSH_TRANSPORT__.ownsHost` 生效；
+- 窗口标题跟随文档标题（`document.title` → 原生标题栏，实测从 `DSH` 变为 `DeepSeek Harness`）；
 - 原生 API：`/__dsh_tauri__/info`、`/preferences`、`/permissions` 实测返回；
   目录选择走 zenity，剪贴板走 wl-copy/wl-paste，通知走 notify-send，外链走 xdg-open。
 

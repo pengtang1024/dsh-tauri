@@ -203,11 +203,25 @@ fn run(app: &AppHandle) -> Result<(), String> {
             // log the kind only, never the body.
             Some("host") => eprintln!("[dsh-tauri] host event: {}", host_event_kind(&event)),
             Some("error") => eprintln!("[dsh-tauri] bridge: {}", event.get("message").and_then(Value::as_str).unwrap_or("unknown error")),
+            Some("title") => set_window_title(app, event.get("title").and_then(Value::as_str).unwrap_or("")),
             Some("exit") => break,
             _ => {}
         }
     }
     Ok(())
+}
+
+fn set_window_title(app: &AppHandle, title: &str) {
+    if title.is_empty() {
+        return;
+    }
+    let handle = app.clone();
+    let title = title.to_owned();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.set_title(&title);
+        }
+    });
 }
 
 fn open_window(app: &AppHandle, ready: &Value) -> Result<(), String> {

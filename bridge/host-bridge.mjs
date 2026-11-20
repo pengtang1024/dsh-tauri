@@ -41,7 +41,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
-import { handleShellRequest } from './shell-api.mjs';
+import { handleShellRequest, setEventSink } from './shell-api.mjs';
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -79,6 +79,8 @@ const asNode = !/[\\/]node(?:\.exe)?$/i.test(executable);
 function emit(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
 }
+
+setEventSink(emit);
 
 let auth;                 // { host, cookie } once the Host is ready and authenticated
 let proxyOrigin;          // loopback origin the WebView loads

@@ -24,6 +24,33 @@
 
   window.__DSH_DIRECTORY_PICKER__ = { pick: pickDirectory };
 
+  /**
+   * Mirror the document title into the window title: WebKit reports it to the
+   * application, but Tauri does not forward it, so the shell would stay on a
+   * static "DSH" while the conversation changes.
+   */
+  (() => {
+    let last = '';
+    let timer;
+    const publish = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const title = document.title;
+        if (typeof title !== 'string' || title === last || title === '') return;
+        last = title;
+        call('/window-title', { title }).catch(() => undefined);
+      }, 200);
+    };
+    document.addEventListener('DOMContentLoaded', publish, { once: true });
+    window.addEventListener('load', publish, { once: true });
+    publish();
+    new MutationObserver(publish).observe(document.head ?? document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+  })();
+
   window.__DSH_TAURI__ = {
     pickDirectory,
     openExternal: (url) => call('/open-external', { url }),

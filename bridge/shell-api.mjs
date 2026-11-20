@@ -17,6 +17,14 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
 const BASE = '/__dsh_tauri__';
+
+/** Sink for events that must reach the Rust side; the bridge relays them. */
+let emitEvent = () => {};
+
+/** @param sink - receives `{type, ...}` objects for the shell's stdout channel. */
+export function setEventSink(sink) {
+  emitEvent = sink;
+}
 const PREFERENCES_FILE = join(homedir(), '.dsh', 'desktop-preferences.json');
 /** Dropped files are copied here so the Host can read them by absolute path. */
 const DROP_DIR = join(homedir(), '.dsh', 'dsh-tauri-drops');
@@ -131,6 +139,13 @@ const routes = {
     screen: 'granted',
     accessibility: 'unknown'
   }),
+
+  /** Mirror the document title into the native window title. */
+  'POST /window-title': async (body) => {
+    const title = typeof body?.title === 'string' ? body.title.slice(0, 200) : '';
+    emitEvent({ type: 'title', title });
+    return { title };
+  },
 
   'POST /report': async (body) => {
     process.stderr.write(`[renderer] ${JSON.stringify(body)}\n`);
