@@ -1,87 +1,56 @@
-# 开发与验证
+# 开发手册
 
 ## 分层
 
-| 层 | 位置 | 说明 |
+| 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 外壳 | `src-tauri/src/` | Tauri 应用：安装探测、子进程监督、窗口/菜单/托盘、窗口状态 |
-| 桥 | `bridge/` | Node 侧：fork 官方 Host、回环反代、原生 API、renderer shim |
-| 探针 | `tools/` | 契约验证与 asar 提取，不参与打包 |
-| 文档 | `docs/CONTRACT.md` | 从官方外壳逆向出来的契约，改动前先读 |
+| 服务监督 | `src-tauri/src/dsh.rs` | spawn `dsh web`、从 stdout 解析 URL、崩溃重启、SIGTERM 退出 |
+| 原生能力 | `src-tauri/src/native.rs` | 目录选择、剪贴板、通知、外链、窗口标题 + 注入脚本 |
+| 外壳 | `src-tauri/src/shell_ui.rs` | 窗口、菜单、托盘、窗口状态、错误页、几何裁剪 |
+| 单实例 | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |
 
 ## 验证命令
 
 ```bash
-npm run check                  # 三个 bridge 脚本的 node --check
-npm test                       # shell API 路由测试（不需要真机 Host）
-node tools/probe-host.mjs      # 直连 Host：认证、反代头规则、index 注入
-node tools/probe-bridge.mjs    # 完整链路：bridge + 反代 + WebSocket 升级
-cd src-tauri && cargo build    # 外壳编译
-npm run build                  # 产出 .deb 与 AppImage
+node --check tools/probe-web.mjs
+npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
+cd src-tauri && cargo test && cargo build    # Rust 单测 + 构建
 ```
 
-`probe-bridge` 期望看到：`ready`、认证 303 + set-cookie、`GET /` 200 且含 `#root`、
-`/api/remote.mux` 经代理返回 101。
-
-## 冒烟钩子
-
-没有可用的合成输入通道（Wayland 下 `wtype` 拿不到 virtual-keyboard 协议，`ydotool` 需要
-root），所以窗口关闭路径由一个环境变量驱动：
+`npm test` 需要先装运行时：
 
 ```bash
-# closeToTray 为真：窗口隐藏，进程与 Host 继续存活，不写窗口状态
-DSH_TAURI_SMOKE_CLOSE=1 ./src-tauri/target/debug/dsh-tauri
-
-# closeToTray 为假：进程退出，并写入 ~/.dsh/dsh-tauri-window-state.json
-# （改 ~/.dsh/desktop-preferences.json 的 closeToTray 后重跑同一条命令）
+npm install --prefix runtime @deepseek-ai/dsh
 ```
 
-窗口尺寸在下次启动时恢复；位置只在平台允许由客户端摆放时才生效。
+## 关键实现注意点
 
-## 调试安装探测
+1. **服务 URL 只从 stdout 拿**：`dsh web` 打印 `dsh web: http://127.0.0.1:<port>/?token=…`；
+   不要自己猜端口，`--port 0` 让系统分配。
+2. **窗口必须在拿到 URL 之后直接创建在该 URL 上**。先建 splash 窗口再 `navigate` 会让
+   WebKit 丢掉认证重定向的 `Set-Cookie`（表现为页面只剩
+   `dsh web authentication required`）。所以用独立 label 的 splash 窗口，命中 URL 时
+   另建 `main` 窗口再销毁 splash。
+3. **注入脚本要在页面脚本之前**：`WebviewWindowBuilder::initialization_script`。
+   它依赖 `withGlobalTauri`（见 `tauri.conf.json`）提供的 `window.__TAURI__.core.invoke`。
+4. **查询字符串里的 token 是一次性认证入口**：`GET` 返回 303 并下发 `dsh-auth-<authority>`
+   cookie（`HttpOnly; SameSite=Strict`）。服务端按 authority 生成 cookie 名，端口变了名字就变。
+5. **退出走 SIGTERM**：`dsh::shutdown()` 先 `kill -TERM`，5 秒后仍未退出才 SIGKILL，
+   避免会话库留下 WAL 残渣。
+6. **托盘退出**要先 `dsh::shutdown()` 再 `app.exit(0)`，否则会留下孤儿 node 进程。
+
+## 运行时查找顺序
+
+`DSH_TAURI_RUNTIME` → 仓库内 `runtime/`（存在 `node_modules` 才算）→
+`~/.dsh/dsh-tauri/runtime` → 打包资源目录下的 `runtime/`。
+
+都找不到时显示错误页，正文里带安装命令。
+
+## 冒烟检查（人工）
 
 ```bash
-DSH_TAURI_APP_ROOT="/opt/DSH NEXT/resources/app.asar" cargo run
-RUST_LOG=debug cargo run          # Tauri/GTK 侧日志
+cd src-tauri && cargo run          # 应看到 splash，随后出现完整 UI
+curl -s -o /dev/null -w '%{http_code}\n' "$(grep -ao 'http://127.0.0.1:[0-9]*/?token=[A-Za-z0-9_-]*' /tmp/xxx.log | head -1)"
 ```
 
-`lib/host.js` 的 stdout 会被 bridge 转成 `log` 行打到自己的 stderr，stderr 尾部保留 16KB，
-Host 退出时会随 `exit` 事件一起上报。
-
-## 发布
-
-`npm run build` 之后产物在 `src-tauri/target/release/bundle/{deb,appimage}/`。
-CI（`.github/workflows/build.yml`）在每次 push 上跑同样的命令并把两个包作为 artifact 上传。
-
-## 单实例与崩溃恢复
-
-- `src-tauri/src/single_instance.rs`：在 `$XDG_RUNTIME_DIR/dsh-tauri.sock` 上监听。第二次启动
-  连上该 socket 发 `focus` 后 `exit(0)`；主实例收到后显示/取消最小化/聚焦主窗。socket 随进程
-  消失，残留文件在下次启动时被重新接管。
-- `bridge.rs` 的 `run()` 在 Host 意外退出时最多重启 3 次（间隔 2s），每次重新 spawn bridge；
-  超限则弹错误窗口（`shell_ui::build_error_window`）。托盘「退出」走 `bridge::shutdown()`，
-  置 `SHUTTING_DOWN` 后不再重启。
-- 注意：Host 被 `SIGKILL` 后立刻重启可能因 profile 里的残留状态启动失败（日志里是
-  `CordisError: cannot create effect on inactive context` + `authentication failed (status 404)`），
-  此时再启动一次应用即可恢复。
-
-## 通知
-
-`bridge.rs` 把 Host 的 `notification` 事件交给 `shell_ui::show_notification`：
-
-- 先看 `~/.dsh/desktop-preferences.json` 的 `notifications` 与按结果分的开关
-  （`turnCompleted` / `turnFailed` / `scheduleCompleted` / `scheduleFailed`），默认开；
-- 主窗有焦点时不打扰；
-- 文案走 `shell_ui::notification_text`（回合完成用消息本身，其它用固定句子，中英按 `LANG`），
-  再交给 `notify-send` 发系统通知。
-
-## 上游契约漂移
-
-外壳不打包 Host，只在每次启动时读取本机安装，所以 DSH Desktop 升级后无需重打包。风险在于
-上游可能改动桌面契约（认证头名、index 注入、Host 参数）。为此：
-
-- `bridge/asar.mjs` 从 `app.asar` 里读 `package.json` 的版本，`ready` 事件带 `version`，
-  Rust 侧打印 `[dsh-tauri] DSH Desktop <version>`；
-- 认证失败等错误消息里带上该版本，并提示运行 `node tools/probe-bridge.mjs`；
-- 升级 DSH Desktop 后跑一次 `node tools/probe-bridge.mjs`，四项（认证 / 反代 / `/` 文档 /
-  WebSocket 101）全过即契约未变；`docs/CONTRACT.md` 记录了断言的来源行号，便于重新核对。
+窗口内应能看到：会话列表、工作区、模型选择器、正在运行的会话流。

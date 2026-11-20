@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DSH Tauri",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "identifier": "dev.dshtauri.desktop",
   "build": {
     "frontendDist": "./dist"
@@ -10,7 +10,8 @@
     "windows": [],
     "security": {
       "csp": null
-    }
+    },
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": true,
@@ -21,10 +22,6 @@
     "category": "DeveloperTool",
     "shortDescription": "Tauri shell for DeepSeek Harness Desktop",
     "longDescription": "Runs the Node host shipped with an existing DeepSeek Harness Desktop installation inside a Tauri window: desktop mode, live WebSocket streams and the native bridge are preserved without the Electron runtime.",
-    "resources": {
-      "../bridge/*.mjs": "bridge/",
-      "../bridge/*.js": "bridge/"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

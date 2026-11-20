@@ -29,16 +29,16 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Check the bridge scripts
-        run: |
-          node --check bridge/host-bridge.mjs
-          node --check bridge/shell-api.mjs
-          node --check bridge/renderer-shim.js
+      - name: Check the probe script
+        run: node --check tools/probe-web.mjs
 
       - name: Install the Tauri CLI
         run: npm ci
 
-      - name: Test the shell API
+      - name: Install the DSH runtime
+        run: npm install --prefix runtime @deepseek-ai/dsh
+
+      - name: Test the runtime contract
         run: npm test
 
       - name: Test the Rust shell

@@ -1,6 +1,5 @@
-//! Native shell furniture: the application menu, the tray icon and window
-//! geometry persistence — the parts of the Electron shell that live outside the
-//! web application itself.
+//! Native shell furniture: the window, its menu, the tray and remembered
+//! geometry — everything around the DSH web UI.
 
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder, Wry};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
 /// Window geometry remembered across launches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +58,8 @@ pub fn save_window_state(window: &WebviewWindow<Wry>) {
     }
 }
 
-/** Read `closeToTray` from the shared desktop preferences (default: true). */
+/// Read `closeToTray` from the shared desktop preferences (default: true) so a
+/// window close keeps the server (and the session) alive in the tray.
 fn close_to_tray() -> bool {
     let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
     let path = home.join(".dsh").join("desktop-preferences.json");
@@ -70,7 +70,7 @@ fn close_to_tray() -> bool {
 
 /// Menu shared by the window and the tray. Editing items are predefined so the
 /// WebView keeps its native clipboard and undo behaviour.
-pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let edit = Submenu::with_items(
         app,
         "编辑",
@@ -136,7 +136,7 @@ pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "quit" => {
-                crate::bridge::shutdown();
+                crate::dsh::shutdown();
                 app.exit(0);
             }
             _ => {}
@@ -161,136 +161,31 @@ fn show_main_window(app: &AppHandle<Wry>) {
     }
 }
 
-/// Explain a fatal startup problem in a real window: a console-only message
-/// looks like the application never launched.
-pub fn build_error_window(app: &AppHandle<Wry>, message: &str) -> Result<WebviewWindow<Wry>, String> {
-    let encoded = urlencoding(message);
-    WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(format!("error.html#{encoded}").into()))
-        .title("DSH Tauri")
-        .inner_size(760.0, 520.0)
-        .min_inner_size(520.0, 380.0)
-        .build()
-        .map_err(|error| format!("cannot open the error window: {error}"))
+/// Keep a remembered geometry usable: a monitor change must not park the window
+/// off-screen (Wayland ignores the position, but not the size).
+fn fit_to_screen<R: tauri::Runtime>(app: &AppHandle<R>, mut state: WindowState) -> WindowState {
+    let Ok(Some(monitor)) = app.primary_monitor() else { return state };
+    let scale = monitor.scale_factor();
+    let size = monitor.size();
+    let width = f64::from(size.width) / scale;
+    let height = f64::from(size.height) / scale;
+    state.width = state.width.min(width - 40.0).max(880.0);
+    state.height = state.height.min(height - 80.0).max(600.0);
+    state
 }
 
-/** Percent-encode a message so it survives the fragment of a local document. */
-fn urlencoding(message: &str) -> String {
-    let mut encoded = String::with_capacity(message.len());
-    for byte in message.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' | b' ' => {
-                encoded.push(byte as char);
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}"))
-        }
-    }
-    encoded
-}
-
-/// Preference names the Host uses for each notification outcome.
-fn notification_preference(outcome: &str) -> &'static str {
-    match outcome {
-        "turn-completed" => "turnCompleted",
-        "turn-failed" => "turnFailed",
-        "schedule-completed" => "scheduleCompleted",
-        "schedule-failed" => "scheduleFailed",
-        _ => "turnCompleted"
-    }
-}
-
-fn preference_flag(name: &str) -> bool {
-    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
-    let Ok(text) = fs::read_to_string(home.join(".dsh").join("desktop-preferences.json")) else { return true };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { return true };
-    value.get(name).and_then(serde_json::Value::as_bool).unwrap_or(true)
-}
-
-/**
- * Copy for one notification, matching the Electron shell: a finished turn uses
- * the messages themselves, everything else is a fixed sentence.
- */
-pub fn notification_text(notification: &serde_json::Value, zh: bool) -> (String, String) {
-    let outcome = notification.get("outcome").and_then(serde_json::Value::as_str).unwrap_or("");
-    let text = |key: &str| {
-        notification.get(key).and_then(serde_json::Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned)
-    };
-    let pick = |zh_text: &str, en_text: &str| if zh { zh_text.to_owned() } else { en_text.to_owned() };
-    match outcome {
-        "turn-completed" => (
-            text("userMessage").unwrap_or_else(|| pick("回合已完成", "Turn completed")),
-            text("assistantMessage").unwrap_or_else(|| pick("你发起的回合已完成。", "A turn you started has finished."))
-        ),
-        "schedule-completed" => (
-            pick("自动化任务完成", "Automation task completed"),
-            pick("一个自动化任务已完成。", "An automation task has finished.")
-        ),
-        "schedule-failed" => (
-            pick("自动化任务失败", "Automation task failed"),
-            pick("打开 DSH 查看详情。", "Open DSH for details.")
-        ),
-        _ => (pick("回合未能完成", "Turn could not finish"), pick("打开 DSH 查看详情。", "Open DSH for details."))
-    }
-}
-
-/**
- * Show one Host notification, mirroring the Electron shell: nothing while the
- * window has focus, and only for the outcomes the user left enabled.
- */
-pub fn show_notification(app: &AppHandle<Wry>, notification: &serde_json::Value) {
-    let outcome = notification.get("outcome").and_then(serde_json::Value::as_str).unwrap_or("");
-    if !preference_flag("notifications") || !preference_flag(notification_preference(outcome)) {
-        return;
-    }
-    let focused = app.get_webview_window("main").and_then(|window| window.is_focused().ok()).unwrap_or(false);
-    if focused {
-        return;
-    }
-    let zh = std::env::var("LANG").map(|value| value.starts_with("zh")).unwrap_or(true);
-    let (title, body) = notification_text(notification, zh);
-    let _ = std::process::Command::new("notify-send")
-        .args(["-a", "DSH", &title, &body])
-        .status();
-}
-
-/**
- * Open the Platform sign-in window.
- *
- * The page is a normal HTTPS site; the only special part is the last hop — when
- * it navigates to the Host's `/oauth/callback`, the request has to be replayed
- * as the native renderer, so the bridge does it through the loopback proxy and
- * this window is closed once that settles.
- */
-pub fn build_login_window(app: &AppHandle<Wry>, url: &str) -> Result<WebviewWindow<Wry>, String> {
-    let target = tauri::Url::parse(url).map_err(|error| format!("invalid sign-in url: {error}"))?;
-    let host_origin = crate::bridge::host_origin().unwrap_or_default();
-    let window = WebviewWindowBuilder::new(app, "login", tauri::WebviewUrl::External(target))
-        .title("登录 DeepSeek")
-        .inner_size(520.0, 760.0)
-        .on_navigation(move |url| {
-            let is_callback = url.path() == "/oauth/callback"
-                && (host_origin.is_empty() || url.origin().ascii_serialization() == host_origin);
-            if is_callback {
-                crate::bridge::complete_platform_login(url.as_str());
-                return false;
-            }
-            true
-        })
-        .build()
-        .map_err(|error| format!("cannot open the sign-in window: {error}"))?;
-    Ok(window)
-}
-
-/// Build the main window with the remembered geometry and shared menu.
-pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<WebviewWindow<Wry>, String> {
-    let state = load_window_state();
+/// Splash shown while the server boots; it is replaced by the real UI.
+pub fn build_boot_window(app: &AppHandle<Wry>) -> Result<WebviewWindow<Wry>, String> {
+    let state = fit_to_screen(app, load_window_state());
     let menu = build_menu(app).map_err(|error| format!("cannot build the application menu: {error}"))?;
-    let mut builder = WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(url))
+    let mut builder = WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("boot.html".into()))
+        // Rebuild the globals a desktop client is expected to provide, on top of
+        // the native commands; see native::SHIM.
+        .initialization_script(crate::native::SHIM)
         .title("DSH")
         .inner_size(state.width, state.height)
         .min_inner_size(880.0, 600.0)
         .menu(menu);
-    // Wayland compositors own window placement, so a remembered position is
-    // advisory: it is applied where the platform allows it and ignored elsewhere.
     if let (Some(x), Some(y)) = (state.x, state.y) {
         builder = builder.position(f64::from(x), f64::from(y));
     }
@@ -298,8 +193,68 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
     if state.maximized {
         let _ = window.maximize();
     }
-    // Closing must honour `closeToTray`: keep the Host alive in the tray instead
-    // of tearing the session down, unless the user disabled it.
+    attach_window_events(&window);
+    Ok(window)
+}
+
+/// Point the window at the server.
+///
+/// A window created for the splash (`tauri://localhost/boot.html`) cannot simply
+/// navigate to the token URL: WebKit treats the `Set-Cookie` on the auth redirect
+/// as third-party and drops it, so the UI lands on "authentication required".
+/// A window created *at* the URL is a first-party navigation and keeps the cookie,
+/// so the splash window is destroyed and replaced.
+pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<WebviewWindow<Wry>, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.navigate(url).map_err(|error| format!("cannot open the UI: {error}"))?;
+        return Ok(window);
+    }
+    // The splash lives in its own window: reusing one label for two document
+    // lifetimes makes WebKit drop the auth cookie, and the UI lands on
+    // "authentication required".
+    let splash = app.get_webview_window("splash");
+    let state = fit_to_screen(app, load_window_state());
+    let menu = build_menu(app).map_err(|error| format!("cannot build the application menu: {error}"))?;
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+        .initialization_script(crate::native::SHIM)
+        .title("DSH")
+        .inner_size(state.width, state.height)
+        .min_inner_size(880.0, 600.0)
+        .menu(menu);
+    if let (Some(x), Some(y)) = (state.x, state.y) {
+        builder = builder.position(f64::from(x), f64::from(y));
+    }
+    let window = builder.build().map_err(|error| format!("cannot open the window: {error}"))?;
+    if state.maximized {
+        let _ = window.maximize();
+    }
+    attach_window_events(&window);
+    if let Some(splash) = splash {
+        let _ = splash.destroy();
+    }
+    Ok(window)
+}
+
+/// Show a readable failure page instead of a blank window.
+pub fn show_error(app: &AppHandle<Wry>, message: &str) -> Result<(), String> {
+    let handle = app.clone();
+    let encoded = urlencoding(message);
+    if let Some(window) = handle.get_webview_window("main") {
+        let target: tauri::Url = format!("tauri://localhost/error.html#{encoded}")
+            .parse()
+            .map_err(|error| format!("bad error URL: {error}"))?;
+        return window.navigate(target).map_err(|error| format!("cannot show the error page: {error}"));
+    }
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(format!("error.html#{encoded}").into()))
+        .title("DSH")
+        .inner_size(760.0, 560.0)
+        .build()
+        .map_err(|error| format!("cannot open the error window: {error}"))?;
+    attach_window_events(&window);
+    Ok(())
+}
+
+fn attach_window_events(window: &WebviewWindow<Wry>) {
     let closable = window.clone();
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -313,37 +268,18 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
         tauri::WindowEvent::Destroyed => save_window_state(&closable),
         _ => {}
     });
-    Ok(window)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::notification_text;
-    use serde_json::json;
-
-    #[test]
-    fn finished_turn_uses_the_messages() {
-        let notification = json!({
-            "outcome": "turn-completed",
-            "userMessage": "修一下构建",
-            "assistantMessage": "构建已通过，21 个测试全绿。"
-        });
-        let (title, body) = notification_text(&notification, true);
-        assert_eq!(title, "修一下构建");
-        assert_eq!(body, "构建已通过，21 个测试全绿。");
+/// Percent-encode everything outside the unreserved set (error text in the hash).
+fn urlencoding(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b' ' => out.push_str("%20"),
+            b'\n' => out.push_str("%0A"),
+            _ => out.push_str(&format!("%{byte:02X}"))
+        }
     }
-
-    #[test]
-    fn scheduled_task_uses_fixed_copy() {
-        let (title, body) = notification_text(&json!({ "outcome": "schedule-failed" }), true);
-        assert_eq!(title, "自动化任务失败");
-        assert!(body.contains("查看详情"));
-    }
-
-    #[test]
-    fn empty_messages_fall_back_to_the_generic_sentence() {
-        let (title, body) = notification_text(&json!({ "outcome": "turn-completed", "userMessage": "" }), false);
-        assert_eq!(title, "Turn completed");
-        assert_eq!(body, "A turn you started has finished.");
-    }
+    out
 }

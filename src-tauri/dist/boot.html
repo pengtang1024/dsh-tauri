@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DSH</title>
+<style>
+  :root { color-scheme: dark }
+  html, body { height: 100%; margin: 0 }
+  body {
+    background: #0b0d12; color: #d7dbe3;
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif;
+    display: grid; place-content: center; justify-items: center; gap: 18px;
+  }
+  .logo { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, #2b6ef6, #7c4dff);
+          display: grid; place-content: center; font-weight: 700; font-size: 26px; color: #fff }
+  .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #2a2f3a; border-top-color: #5b8cff;
+             animation: spin 900ms linear infinite }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  .hint { color: #7b8494; font-size: 13px }
+</style>
+</head>
+<body>
+  <div class="logo">D</div>
+  <div>正在启动 DSH 服务…</div>
+  <div class="spinner"></div>
+  <div class="hint">首次启动需要初始化插件，通常几秒到半分钟</div>
+</body>
+</html>

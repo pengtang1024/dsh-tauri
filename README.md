@@ -1,185 +1,119 @@
 # dsh-tauri
 
-[![build](https://github.com/pengtang1024/dsh-tauri/actions/workflows/build.yml/badge.svg)](https://github.com/pengtang1024/dsh-tauri/actions/workflows/build.yml)
+用 **Tauri 2** 给 [DeepSeek Harness](https://github.com/deepseek-ai) 做的桌面客户端：
+窗口、托盘、菜单和原生能力来自 Rust + 系统 WebView，Harness 本身运行官方 npm 包
+`@deepseek-ai/dsh`，也就是 `dsh web` 那套纯 Node 服务。
 
-用 **Tauri 2** 重做的 DeepSeek Harness Desktop 外壳：窗口与原生能力由 Rust + 系统 WebView 提供，
-内核仍然是官方那套 Node `@deepseek-ai/*` 运行时——不重写它，也不复制它。
+**不需要 Electron，也不需要安装 DSH Desktop。** 一个 `node` 加一份
+`node_modules/@deepseek-ai/dsh` 就是全部运行时。
 
-它启动官方安装里自带的 Host 进程（纯 Node），
-在 Node 侧做协议桥接与会话认证，再把页面交给系统 WebView 渲染。
-Electron 那 228 MB 的 Chromium 外壳不再需要，而**能力仍在**：桌面模式、实时流、目录选择器、
-剪贴板、通知、外链跳转都通过同一套接口对外提供。
+![dsh-tauri 运行中的窗口](docs/images/shell.png)
 
-![DSH Tauri 外壳](docs/images/shell.png)
+## 和「把 Electron 应用塞进 Tauri」有什么不同
 
-> 状态：**v0.1，可用**。Linux + WebKitGTK 已实测跑通（窗口、桌面模式、实时 WebSocket 流、
-> 原生桥接口）。发布形态、托盘、原生菜单仍在路线图上，见 [已知差距](#已知差距)。
+Tauri 只提供系统 WebView 和 Rust 后端，不带 Node 运行时。所以关键不在于换个壳，
+而在于**跑哪个本体**：
 
-## 为什么不是「打包 Electron 应用」
+| 做法 | 运行时 | 结果 |
+| --- | --- | --- |
+| Tauri 套 Electron 安装目录 | `/opt/DSH NEXT` 的 app.asar（内核依赖 Electron 主进程） | 仍然要对官方安装做逆向，官方一升级就崩 |
+| **本项目** | npm 上的 `@deepseek-ai/dsh`，`dsh web` 一个普通 Node 进程 | 本体是公开分发的包，升级只需改版本号 |
 
-Tauri 只提供系统 WebView 与 Rust 后端，**不带 Node 运行时**；而 DSH 的内核是一组 Node 服务。
-所以真正的移植点是「外壳」，不是「内核」。本项目把外壳拆成两半：
-
-- **Rust（`src-tauri/`）**：窗口、生命周期、未来的托盘/菜单/原生对话框；
-- **Node（`bridge/`）**：`fork` 官方 `lib/host.js`，把它的 IPC 通道转成换行分隔的 JSON；
-  同时在本机回环地址上跑一个反向代理，替渲染层补上会话 cookie 与渲染令牌。
-
-被移除的是 Chromium 自带的渲染进程与 Electron 主进程；被保留的是官方安装里的 Host、插件、
-profile 与会话数据——因此**与官方桌面共用同一份 `~/.dsh`**，会话、插件、账号状态都一致。
+于是外壳要做的事只剩三件：把服务拉起来、把窗口指过去、把浏览器给不了的能力补上。
 
 ## 架构
 
 ```
-┌──────────────────────────── Tauri 进程（Rust） ────────────────────────────┐
-│  WebviewWindow ──► http://127.0.0.1:<proxy>/                              │
-│  监督 bridge 子进程：读取 JSON 事件，收到 ready 后开窗                      │
-└───────────────▲───────────────────────────────────────────────────────────┘
-                │ stdin/stdout：每行一个 JSON
-┌───────────────┴──── bridge（Node，`bridge/host-bridge.mjs`）──────────────┐
-│ 1. spawn `<root>/lib/host.js`，stdio: [ignore, pipe, pipe, ipc]            │
-│ 2. 用 x-dsh-desktop-renderer 令牌换 303 + 会话 cookie                       │
-│ 3. 起回环反代：补 cookie/令牌/Origin，转发 HTTP 与 WebSocket 升级           │
-│ 4. 注入 renderer shim：重建 window.dshDesktop* / 目录选择器等全局           │
-│ 5. 暴露 /__dsh_tauri__/ 原生 API（目录选择、剪贴板、通知、外链、权限）      │
-└───────────────▲───────────────────────────────────────────────────────────┘
-                │ 官方 Host 的 fork IPC（fd 3）
-┌───────────────┴──────────── Host（官方 Node 运行时，未修改）──────────────┐
-└───────────────────────────────────────────────────────────────────────────┘
+┌────────────────────── Tauri 进程（Rust） ──────────────────────┐
+│ 托盘 / 菜单 / 窗口状态 / 单实例 / 崩溃重启                      │
+│ 原生命令：目录选择、剪贴板、通知、外链、窗口标题                │
+│ window ──► http://127.0.0.1:<port>/?token=…                    │
+└──────────┬───────────────────────────────────────▲─────────────┘
+           │ spawn（stdout 里解析 URL）             │ invoke
+┌──────────▼───────────────────────────────────────┴─────────────┐
+│ node runtime/node_modules/@deepseek-ai/dsh/lib/bin.js           │
+│   --profile web --host 127.0.0.1 --port 0 --no-open             │
+│ 官方 Web UI + 插件 + 会话存储（DSH_HOME，默认 ~/.dsh）           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-完整的逆向结论（进程参数、认证握手、需要剔除的响应头、WebSocket 约束）记录在
-[docs/CONTRACT.md](docs/CONTRACT.md)，可直接用 `tools/probe-host.mjs` 复现。
-
-## 上游更新
-
-DSH Desktop 升级后**不需要重新打包**：外壳每次启动都从本机安装里读 Host、Node 运行时与
-profile，路径稳定，版本随之更新。启动日志会打印实际驱动的版本：
-
-```
-[dsh-tauri] DSH Desktop 2.0.24-next
-```
-
-若上游改动了桌面契约（认证头、index 注入、Host 参数），外壳会以带版本号的错误提示失败，
-而不是静默白屏；此时运行契约探针复查：
-
-```bash
-node tools/probe-bridge.mjs   # 认证 / 反代 / WebSocket 全链路
-node tools/probe-host.mjs     # 只测 Host 本身
-```
-
-已实测的版本：`dsh-desktop-next 2.0.24-next`（Electron 44.7.0，91 个 `@deepseek-ai/dsh-*@0.2.2-rc.5`）。
+注入脚本（`src-tauri/src/native.rs::SHIM`）在页面脚本之前执行，补上
+`__DSH_DIRECTORY_PICKER__`、`__DSH_TAURI__`（剪贴板/通知/外链），并把
+`document.title` 同步到原生标题栏——WebKit 不会自己同步。
 
 ## 依赖
 
-- 已安装的 **DSH Desktop**（默认探测 `/opt/DSH NEXT/resources/app.asar`，
-  也可用 `DSH_TAURI_APP_ROOT` 指定）
+- Node 24+（在 PATH 里，或 `DSH_TAURI_NODE` 指定）
 - Rust 1.9x、`webkit2gtk-4.1`、`libsoup-3.0`、`librsvg2`、`libayatana-appindicator3`、`patchelf`
-- Node ≥ 22（只用来跑 bridge；也可以用官方安装自带的 Node）
-
-Debian/Ubuntu：
+- 运行时 Gnome 工具：`zenity`（目录选择）、`wl-clipboard`（剪贴板）、`libnotify-bin`（通知）
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
-  libayatana-appindicator3-dev patchelf build-essential
+  libayatana-appindicator3-dev patchelf build-essential \
+  zenity wl-clipboard libnotify-bin
 ```
-
-## 安装
-
-从 [Releases](https://github.com/pengtang1024/dsh-tauri/releases) 取构建好的包：
-
-```bash
-sudo dpkg -i "DSH.Tauri_0.1.0_amd64.deb"     # Debian/Ubuntu
-# 或者直接运行 AppImage
-chmod +x "DSH.Tauri_0.1.0_amd64.AppImage" && "./DSH.Tauri_0.1.0_amd64.AppImage"
-```
-
-前置条件只有一个：本机已安装 DSH Desktop（外壳复用它的 Node 运行时与 profile）。
-卸载 `sudo dpkg -r dsh-tauri`；首次启动会读取 `~/.dsh/desktop-preferences.json`。
 
 ## 构建与运行
 
 ```bash
-# 1) 开发运行
-cd src-tauri
-cargo run
+npm install --prefix runtime @deepseek-ai/dsh   # 装 Harness 本体（约 1.2GB）
+npm test                                        # 运行时契约探针
 
-# 2) 只验证 Host 契约（不启动窗口）
-cd ..
-node tools/probe-host.mjs      # 直连 Host：认证 / 反代 / 注入
-node tools/probe-bridge.mjs    # 完整链路：bridge + 回环反代 + WebSocket
+cd src-tauri && cargo run
 ```
 
-测试与桥接自检：
+`cargo run` 会自己拉起服务并在窗口里打开。常用覆盖项：
+
+| 变量 | 作用 |
+| --- | --- |
+| `DSH_TAURI_RUNTIME` | 运行时目录（含 `node_modules`） |
+| `DSH_TAURI_NODE` | node 可执行文件 |
+| `DSH_TAURI_PROFILE` | 启动哪个 profile（默认 `web`） |
+| `DSH_HOME` | 数据目录（默认 `~/.dsh`） |
+| `DSH_TAURI_URL` | 开发用：直接打开已在运行的服务，不自己 spawn |
+
+打包（deb / AppImage）用 `npx tauri build`，不随包分发 `node_modules`：装好后执行一次
 
 ```bash
-npm test                       # shell API 路由测试（stage-file / 404 / 前缀隔离）
-npm run check                  # 三个 bridge 脚本的语法检查
-node tools/probe-bridge.mjs    # 真实拉起 Host，验证认证、反代与 WebSocket
+npm install --prefix ~/.dsh/dsh-tauri/runtime @deepseek-ai/dsh
 ```
 
-`cargo run` 会自动发现官方安装；如需指定：
-
-```bash
-DSH_TAURI_APP_ROOT="/opt/DSH NEXT/resources/app.asar" cargo run
-```
-
-其它可覆盖项：`DSH_TAURI_NODE`、`DSH_TAURI_BRIDGE`、`DSH_TAURI_PROFILE`、
-`DSH_TAURI_PRIMARY_RUNTIME`、`DSH_TAURI_EXECUTABLE`、`DSH_TAURI_SHIM`。
+外壳会按「`DSH_TAURI_RUNTIME` → 仓库内 `runtime/` → `~/.dsh/dsh-tauri/runtime`」依次查找。
 
 ## 目录
 
 ```
-bridge/host-bridge.mjs    Host 监督 + 回环反代 + 行式 JSON 桥
-bridge/shell-api.mjs      /__dsh_tauri__ 原生 API（目录选择、剪贴板、通知、外链、权限）
-bridge/renderer-shim.js   注入页面的 renderer 全局（重建 Electron preload 的公开面）
-src-tauri/src/bridge.rs   子进程监督、安装探测、ready 后开窗
-src-tauri/src/main.rs     Tauri 应用与退出清理
-tools/                    契约探针与 asar 提取工具
-docs/CONTRACT.md          逆向出来的官方外壳契约
+src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
+src-tauri/src/native.rs     原生命令 + 注入脚本
+src-tauri/src/shell_ui.rs   窗口、菜单、托盘、窗口状态、错误页
+src-tauri/src/single_instance.rs  单实例（Unix socket）
+runtime/                    仅开发用：本地安装的 @deepseek-ai/dsh
+tools/probe-web.mjs         运行时契约探针
+docs/DEVELOPMENT.md         开发与验证手册
 ```
 
-## 已验证
+## 已验证（Linux + WebKitGTK 2.52）
 
-- 官方 Host 以 `ELECTRON_RUN_AS_NODE` 方式启动并回报 `ready`（14 项 index 注入）；
-- 认证：`x-dsh-desktop-renderer` → 303 + `set-cookie`；裸 cookie 或裸令牌均被拒（403 / 401）；
-- 反向代理：`GET /` 200 且是真客户端 HTML；`/plugins/**` 不缓存；
-- WebSocket：`/api/remote.mux` 经代理返回 **101** 并保持长连接（会话与终端流实时刷新）；
-- 桌面模式：`dshDesktopBoot.ready()` 打通，`__DSH_TRANSPORT__.ownsHost` 生效；
-- 单实例：第二次启动会把已有窗口提到前台后退出（`$XDG_RUNTIME_DIR/dsh-tauri.sock`），
-  不会在同一 profile 上再起第二个 Host；
-- Host 意外退出（被杀、崩溃）时自动重启，最多 3 次，仍失败则弹错误窗口说明原因；
-- Host 通知（回合完成 / 自动化任务）按偏好与窗口焦点转成系统通知，文案与官方外壳一致
-  （`cargo test` 覆盖三种文案分支）；
-- 平台登录：Host 发来 `platform-login{action:open}` 时开登录窗；登录窗跳回 Host 的
-  `/oauth/callback` 时由 bridge 以原生渲染器身份经代理重放（实测回调 404 → 窗口自动关闭）；
-- 窗口标题跟随文档标题（`document.title` → 原生标题栏，实测从 `DSH` 变为 `DeepSeek Harness`）；
-- 原生 API：`/__dsh_tauri__/info`、`/preferences`、`/permissions` 实测返回；
-  目录选择走 zenity，剪贴板走 wl-copy/wl-paste，通知走 notify-send，外链走 xdg-open。
+- `dsh web` 由外壳拉起，从 stdout 解析出 `http://127.0.0.1:<port>/?token=…`；
+  首屏在 3–30 秒内出现（取决于缓存）；
+- 认证链路：token URL → 303 + `dsh-auth-*` cookie → `GET /` 返回客户端 HTML（`tools/probe-web.mjs`）；
+- 窗口里是完整 Web UI：会话列表、工作区、模型选择、插件页、正在进行的会话流都在；
+- 窗口会随 `document.title` 改名；关闭按偏好走「关到托盘」或「退出」；重启恢复尺寸；
+- 第二次启动会聚焦已有窗口后退出，不会起第二个服务；
+- 服务被杀后自动重启（最多 3 次），仍失败则显示可读的错误页；
+- 找不到运行时会显示带修复命令的错误页，而不是空白窗口。
 
-## 能力对照
+## 已知限制
 
-官方 Electron 外壳里那些只有预加载脚本才能提供的入口，逐项对照如下：
-
-| 能力 | 现状 |
+| 项 | 现状 |
 | --- | --- |
-| 桌面模式（`dshDesktopBoot`） | 已实现：客户端进入 `ownsHost` 形态，实时流直连 Host |
-| 原生菜单栏 | 已实现：编辑 / 查看 / 窗口（GTK 菜单，随窗口显示） |
-| 托盘 / 关闭到托盘 | 已实现：托盘菜单「显示主窗口 / 退出」，`closeToTray` 为真时关闭只隐藏窗口 |
-| 窗口状态 | 已实现：尺寸与最大化跨启动保留（Wayland 下位置由合成器决定） |
-| 窗口标题 | 已实现：跟随 `document.title` |
-| 单实例 | 已实现：第二次启动聚焦已有窗口后退出，不会起第二个 Host |
-| 平台登录（`platform-login`） | 已实现：独立登录窗 + 回调经代理以原生渲染器身份重放 |
-| 系统通知（回合 / 自动化任务） | 已实现：按偏好与窗口焦点过滤，文案与官方一致 |
-| 目录选择、剪贴板、外链、权限探测 | 已实现：`/__dsh_tauri__/` 原生 API |
-| 拖拽文件取绝对路径（`__DSH_HOST_PATHS__`） | 已实现：落点被拦截后复制到 `~/.dsh/dsh-tauri-drops/` 再回传绝对路径；复制而非原地引用，之后的外部改动不同步 |
-| Host 崩溃恢复 | 已实现：最多重启 3 次，仍失败弹错误窗口；被 `SIGKILL` 后可能因 profile 残留状态需要重开一次应用 |
-| 打包（.deb / AppImage / 图标 / .desktop） | 已实现：CI 出包，打 tag 时自动发 Release |
-| 平台页内嵌视图（用量 / 充值，`dshPlatform`） | **未实现**：需要 Host 侧账号凭据注入 + 原生视图定位；桌面模式下「去充值」入口由客户端隐藏，请在网页端操作 |
-| 桌面引导 / 首次运行迁移（`dshDesktop`、`dshDesktopSetup`） | **未实现**：不注入这两个全局时客户端走非桌面回退路径；已有 profile 可直接使用，迁移建议在官方桌面完成一次 |
-| 跟随上游更新 | 已实现：不打包 Host，每次启动读本机安装并打印版本；升级 DSH Desktop 后重启即可（契约变了会有带版本的错误提示） |
-| 自动更新 | **未实现**：建议随系统包管理器 / 官方安装一起升级 |
+| 平台页内嵌视图（用量 / 充值） | 走浏览器打开，未做原生内嵌 |
+| 自动更新 | 未做，随发行版或 `npm` 升级 |
+| Windows / macOS | 代码按 Linux 原生命令编写（zenity/wl-clipboard/notify-send），其它平台需要替换这几处 |
+| Wayland 窗口位置 | 由合成器决定，`position()` 只影响 X11 风格合成器 |
+| 首启动等待 | 服务启动期间显示 splash，不显示进度细节 |
 
 ## 说明
 
-本项目与 DeepSeek 官方无关，不含官方二进制；运行期复用**用户本机已安装**的 DSH Desktop
-运行时。上游源码仅用于阅读契约，不随本仓库分发。代码以 MIT 发布，见 [LICENSE](LICENSE)。
+本项目与 DeepSeek 官方无关，不包含官方二进制；运行时由用户按上面的命令安装。
+代码以 MIT 发布，见 [LICENSE](LICENSE)。

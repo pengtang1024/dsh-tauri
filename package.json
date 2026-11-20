@@ -5,13 +5,12 @@
   "description": "Tauri 2 shell for DeepSeek Harness Desktop: keeps desktop mode, live streams and native bridges without Electron.",
   "license": "MIT",
   "scripts": {
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "build:deb": "tauri build --bundles deb",
-    "probe:host": "node tools/probe-host.mjs",
-    "probe:bridge": "node tools/probe-bridge.mjs",
-    "check": "node --check bridge/host-bridge.mjs && node --check bridge/shell-api.mjs && node --check bridge/renderer-shim.js",
-    "test": "node --test test/*.test.mjs"
+    "test": "node tools/probe-web.mjs",
+    "check": "node --check tools/probe-web.mjs",
+    "dev": "cd src-tauri && cargo run",
+    "build": "npx tauri build",
+    "build:deb": "npx tauri build --bundles deb",
+    "install-runtime": "npm install --prefix runtime @deepseek-ai/dsh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
