@@ -12,7 +12,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::Value;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Url};
 
 /// Bridge child handle plus its command channel, kept alive for the app's life.
 struct Session {
@@ -83,7 +83,7 @@ fn find_app_root() -> Option<PathBuf> {
 impl Config {
     /// Resolve the bridge configuration, honouring `DSH_TAURI_*` overrides so a
     /// development checkout can point at a different installation.
-    pub fn resolve() -> Result<Self, String> {
+    pub fn resolve(app: Option<&AppHandle>) -> Result<Self, String> {
         let root = find_app_root().ok_or_else(|| {
             "no DSH Desktop installation found; install DSH Desktop or set DSH_TAURI_APP_ROOT to \
              its resources/app.asar"
@@ -94,9 +94,17 @@ impl Config {
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| format!("unexpected app root {}", root.display()))?;
-        let bridge = env_path("DSH_TAURI_BRIDGE").unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("bridge").join("host-bridge.mjs")
-        });
+        // Packaged builds carry the bridge under the resource directory; a
+        // development checkout uses the sibling `bridge/` folder.
+        let bridge = env_path("DSH_TAURI_BRIDGE")
+            .or_else(|| {
+                app.and_then(|handle| handle.path().resource_dir().ok())
+                    .map(|dir| dir.join("bridge").join("host-bridge.mjs"))
+                    .filter(|path| path.exists())
+            })
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("bridge").join("host-bridge.mjs")
+            });
         let home = env_path("DSH_HOME").unwrap_or_else(|| home_dir().join(".dsh"));
         let node = env_path("DSH_TAURI_NODE")
             .or_else(|| {
@@ -134,7 +142,7 @@ pub fn launch(app: AppHandle) {
 }
 
 fn run(app: &AppHandle) -> Result<(), String> {
-    let config = Config::resolve()?;
+    let config = Config::resolve(Some(app))?;
     let mut command = Command::new(&config.node);
     command
         .arg(&config.bridge)
@@ -181,7 +189,9 @@ fn run(app: &AppHandle) -> Result<(), String> {
         };
         match event.get("type").and_then(Value::as_str) {
             Some("ready") => open_window(app, &event)?,
-            Some("host") => eprintln!("[dsh-tauri] host event: {}", event.get("message").cloned().unwrap_or(Value::Null)),
+            // Host events carry credentials (platform tokens) and bulky payloads:
+            // log the kind only, never the body.
+            Some("host") => eprintln!("[dsh-tauri] host event: {}", host_event_kind(&event)),
             Some("error") => eprintln!("[dsh-tauri] bridge: {}", event.get("message").and_then(Value::as_str).unwrap_or("unknown error")),
             Some("exit") => break,
             _ => {}
@@ -200,18 +210,22 @@ fn open_window(app: &AppHandle, ready: &Value) -> Result<(), String> {
             let _ = existing.navigate(parsed);
             return;
         }
-        let result = WebviewWindowBuilder::new(&handle, "main", WebviewUrl::External(parsed))
-            .title("DSH")
-            .inner_size(1280.0, 840.0)
-            .min_inner_size(880.0, 600.0)
-            .theme(None)
-            .build();
-        match result {
+        match crate::shell_ui::build_main_window(&handle, parsed) {
             Ok(_) => eprintln!("[dsh-tauri] window opened at {url_for_log}"),
-            Err(error) => eprintln!("[dsh-tauri] cannot open window: {error}"),
+            Err(error) => eprintln!("[dsh-tauri] {error}")
         }
     })
     .map_err(|error| format!("cannot reach the main thread: {error}"))
+}
+
+/// Event kind of a Host message, for logging without leaking its payload.
+fn host_event_kind(event: &Value) -> String {
+    let kind = event
+        .get("message")
+        .and_then(|message| message.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    format!("{kind} (payload redacted)")
 }
 
 /// Forward a message to the Host through the bridge's stdin.
