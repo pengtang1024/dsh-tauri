@@ -64,3 +64,13 @@ CI（`.github/workflows/build.yml`）在每次 push 上跑同样的命令并把�
 - 注意：Host 被 `SIGKILL` 后立刻重启可能因 profile 里的残留状态启动失败（日志里是
   `CordisError: cannot create effect on inactive context` + `authentication failed (status 404)`），
   此时再启动一次应用即可恢复。
+
+## 通知
+
+`bridge.rs` 把 Host 的 `notification` 事件交给 `shell_ui::show_notification`：
+
+- 先看 `~/.dsh/desktop-preferences.json` 的 `notifications` 与按结果分的开关
+  （`turnCompleted` / `turnFailed` / `scheduleCompleted` / `scheduleFailed`），默认开；
+- 主窗有焦点时不打扰；
+- 文案走 `shell_ui::notification_text`（回合完成用消息本身，其它用固定句子，中英按 `LANG`），
+  再交给 `notify-send` 发系统通知。

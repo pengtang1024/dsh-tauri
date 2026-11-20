@@ -297,9 +297,18 @@ fn run_once(app: &AppHandle) -> Result<Option<String>, String> {
 /// React to Host events that need shell furniture rather than the WebView.
 fn handle_host_event(app: &AppHandle, message: Option<&Value>) {
     let Some(message) = message else { return };
-    if message.get("type").and_then(Value::as_str) != Some("platform-login") {
-        return;
+    match message.get("type").and_then(Value::as_str) {
+        Some("notification") => {
+            if let Some(notification) = message.get("notification") {
+                crate::shell_ui::show_notification(app, notification);
+            }
+        }
+        Some("platform-login") => handle_platform_login(app, message),
+        _ => {}
     }
+}
+
+fn handle_platform_login(app: &AppHandle, message: &Value) {
     match message.get("action").and_then(Value::as_str) {
         Some("open") => {
             let Some(url) = message.get("url").and_then(Value::as_str) else { return };

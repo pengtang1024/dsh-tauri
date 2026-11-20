@@ -187,6 +187,71 @@ fn urlencoding(message: &str) -> String {
     encoded
 }
 
+/// Preference names the Host uses for each notification outcome.
+fn notification_preference(outcome: &str) -> &'static str {
+    match outcome {
+        "turn-completed" => "turnCompleted",
+        "turn-failed" => "turnFailed",
+        "schedule-completed" => "scheduleCompleted",
+        "schedule-failed" => "scheduleFailed",
+        _ => "turnCompleted"
+    }
+}
+
+fn preference_flag(name: &str) -> bool {
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
+    let Ok(text) = fs::read_to_string(home.join(".dsh").join("desktop-preferences.json")) else { return true };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { return true };
+    value.get(name).and_then(serde_json::Value::as_bool).unwrap_or(true)
+}
+
+/**
+ * Copy for one notification, matching the Electron shell: a finished turn uses
+ * the messages themselves, everything else is a fixed sentence.
+ */
+pub fn notification_text(notification: &serde_json::Value, zh: bool) -> (String, String) {
+    let outcome = notification.get("outcome").and_then(serde_json::Value::as_str).unwrap_or("");
+    let text = |key: &str| {
+        notification.get(key).and_then(serde_json::Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned)
+    };
+    let pick = |zh_text: &str, en_text: &str| if zh { zh_text.to_owned() } else { en_text.to_owned() };
+    match outcome {
+        "turn-completed" => (
+            text("userMessage").unwrap_or_else(|| pick("回合已完成", "Turn completed")),
+            text("assistantMessage").unwrap_or_else(|| pick("你发起的回合已完成。", "A turn you started has finished."))
+        ),
+        "schedule-completed" => (
+            pick("自动化任务完成", "Automation task completed"),
+            pick("一个自动化任务已完成。", "An automation task has finished.")
+        ),
+        "schedule-failed" => (
+            pick("自动化任务失败", "Automation task failed"),
+            pick("打开 DSH 查看详情。", "Open DSH for details.")
+        ),
+        _ => (pick("回合未能完成", "Turn could not finish"), pick("打开 DSH 查看详情。", "Open DSH for details."))
+    }
+}
+
+/**
+ * Show one Host notification, mirroring the Electron shell: nothing while the
+ * window has focus, and only for the outcomes the user left enabled.
+ */
+pub fn show_notification(app: &AppHandle<Wry>, notification: &serde_json::Value) {
+    let outcome = notification.get("outcome").and_then(serde_json::Value::as_str).unwrap_or("");
+    if !preference_flag("notifications") || !preference_flag(notification_preference(outcome)) {
+        return;
+    }
+    let focused = app.get_webview_window("main").and_then(|window| window.is_focused().ok()).unwrap_or(false);
+    if focused {
+        return;
+    }
+    let zh = std::env::var("LANG").map(|value| value.starts_with("zh")).unwrap_or(true);
+    let (title, body) = notification_text(notification, zh);
+    let _ = std::process::Command::new("notify-send")
+        .args(["-a", "DSH", &title, &body])
+        .status();
+}
+
 /**
  * Open the Platform sign-in window.
  *
@@ -249,4 +314,36 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
         _ => {}
     });
     Ok(window)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::notification_text;
+    use serde_json::json;
+
+    #[test]
+    fn finished_turn_uses_the_messages() {
+        let notification = json!({
+            "outcome": "turn-completed",
+            "userMessage": "修一下构建",
+            "assistantMessage": "构建已通过，21 个测试全绿。"
+        });
+        let (title, body) = notification_text(&notification, true);
+        assert_eq!(title, "修一下构建");
+        assert_eq!(body, "构建已通过，21 个测试全绿。");
+    }
+
+    #[test]
+    fn scheduled_task_uses_fixed_copy() {
+        let (title, body) = notification_text(&json!({ "outcome": "schedule-failed" }), true);
+        assert_eq!(title, "自动化任务失败");
+        assert!(body.contains("查看详情"));
+    }
+
+    #[test]
+    fn empty_messages_fall_back_to_the_generic_sentence() {
+        let (title, body) = notification_text(&json!({ "outcome": "turn-completed", "userMessage": "" }), false);
+        assert_eq!(title, "Turn completed");
+        assert_eq!(body, "A turn you started has finished.");
+    }
 }

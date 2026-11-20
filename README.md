@@ -114,6 +114,8 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 - 单实例：第二次启动会把已有窗口提到前台后退出（`$XDG_RUNTIME_DIR/dsh-tauri.sock`），
   不会在同一 profile 上再起第二个 Host；
 - Host 意外退出（被杀、崩溃）时自动重启，最多 3 次，仍失败则弹错误窗口说明原因；
+- Host 通知（回合完成 / 自动化任务）按偏好与窗口焦点转成系统通知，文案与官方外壳一致
+  （`cargo test` 覆盖三种文案分支）；
 - 平台登录：Host 发来 `platform-login{action:open}` 时开登录窗；登录窗跳回 Host 的
   `/oauth/callback` 时由 bridge 以原生渲染器身份经代理重放（实测回调 404 → 窗口自动关闭）；
 - 窗口标题跟随文档标题（`document.title` → 原生标题栏，实测从 `DSH` 变为 `DeepSeek Harness`）；
