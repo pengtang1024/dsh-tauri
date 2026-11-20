@@ -38,6 +38,9 @@ jobs:
       - name: Test the shell API
         run: npm test
 
+      - name: Test the Rust shell
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Build the .deb and AppImage bundles
         run: npx tauri build --bundles deb,appimage
 
