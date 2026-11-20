@@ -38,11 +38,14 @@ jobs:
       - name: Test the shell API
         run: npm test
 
-      - name: Build the .deb bundle
-        run: npx tauri build --bundles deb
+      - name: Build the .deb and AppImage bundles
+        run: npx tauri build --bundles deb,appimage
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dsh-tauri-deb
-          path: target/release/bundle/deb/*.deb
+          name: dsh-tauri-bundles
+          # Cargo puts the workspace target under src-tauri/ unless CARGO_TARGET_DIR says otherwise.
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error

@@ -170,6 +170,8 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
         .inner_size(state.width, state.height)
         .min_inner_size(880.0, 600.0)
         .menu(menu);
+    // Wayland compositors own window placement, so a remembered position is
+    // advisory: it is applied where the platform allows it and ignored elsewhere.
     if let (Some(x), Some(y)) = (state.x, state.y) {
         builder = builder.position(f64::from(x), f64::from(y));
     }

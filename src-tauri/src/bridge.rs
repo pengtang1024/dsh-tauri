@@ -214,7 +214,19 @@ fn open_window(app: &AppHandle, ready: &Value) -> Result<(), String> {
             return;
         }
         match crate::shell_ui::build_main_window(&handle, parsed) {
-            Ok(_) => eprintln!("[dsh-tauri] window opened at {url_for_log}"),
+            Ok(window) => {
+                eprintln!("[dsh-tauri] window opened at {url_for_log}");
+                // Smoke hook: exercise the close path (tray vs. quit) headlessly.
+                if std::env::var("DSH_TAURI_SMOKE_CLOSE").is_ok() {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        eprintln!("[dsh-tauri] smoke: requesting window close");
+                        if let Err(error) = window.close() {
+                            eprintln!("[dsh-tauri] smoke: close failed: {error}");
+                        }
+                    });
+                }
+            }
             Err(error) => eprintln!("[dsh-tauri] {error}")
         }
     })
