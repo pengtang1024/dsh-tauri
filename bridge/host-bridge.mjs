@@ -38,6 +38,8 @@ import { randomBytes } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { existsSync, readFileSync } from 'node:fs';
+
+import { readDesktopVersion } from './asar.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
@@ -75,6 +77,9 @@ const BOOT_SCRIPT =
   'globalThis.__DSH_FILE_UPLOAD__={fetch:(input,init)=>fetch(input,init)};<\/script>';
 const SHIM_ROUTE = '/__dsh_tauri__/shim.js';
 const asNode = !/[\\/]node(?:\.exe)?$/i.test(executable);
+
+/** Upstream build behind `--root`, so logs and errors can name it. */
+const desktopVersion = readDesktopVersion(root);
 
 function emit(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -324,9 +329,18 @@ child.on('message', (message) => {
         url: proxy.origin + '/',
         hostUrl,
         injections,
-        pid: child.pid
+        pid: child.pid,
+        version: desktopVersion
       });
-    }).catch((error) => emit({ type: 'error', message: `host bridge: ${error.message}` }));
+    }).catch((error) =>
+      emit({
+        type: 'error',
+        message:
+          `host bridge: ${error.message}` +
+          (desktopVersion ? ` (DSH Desktop ${desktopVersion})` : '') +
+          '；如果 DSH Desktop 刚升级过，桌面契约可能已变化：运行 node tools/probe-bridge.mjs 复查'
+      })
+    );
     return;
   }
   if (message && typeof message === 'object' && message.type === 'shutdown-complete') {

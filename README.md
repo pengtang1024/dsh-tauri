@@ -50,6 +50,25 @@ profile 与会话数据——因此**与官方桌面共用同一份 `~/.dsh`**�
 完整的逆向结论（进程参数、认证握手、需要剔除的响应头、WebSocket 约束）记录在
 [docs/CONTRACT.md](docs/CONTRACT.md)，可直接用 `tools/probe-host.mjs` 复现。
 
+## 上游更新
+
+DSH Desktop 升级后**不需要重新打包**：外壳每次启动都从本机安装里读 Host、Node 运行时与
+profile，路径稳定，版本随之更新。启动日志会打印实际驱动的版本：
+
+```
+[dsh-tauri] DSH Desktop 2.0.24-next
+```
+
+若上游改动了桌面契约（认证头、index 注入、Host 参数），外壳会以带版本号的错误提示失败，
+而不是静默白屏；此时运行契约探针复查：
+
+```bash
+node tools/probe-bridge.mjs   # 认证 / 反代 / WebSocket 全链路
+node tools/probe-host.mjs     # 只测 Host 本身
+```
+
+已实测的版本：`dsh-desktop-next 2.0.24-next`（Electron 44.7.0，91 个 `@deepseek-ai/dsh-*@0.2.2-rc.5`）。
+
 ## 依赖
 
 - 已安装的 **DSH Desktop**（默认探测 `/opt/DSH NEXT/resources/app.asar`，

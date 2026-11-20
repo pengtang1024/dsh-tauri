@@ -263,7 +263,12 @@ fn run_once(app: &AppHandle) -> Result<Option<String>, String> {
             }
         };
         match event.get("type").and_then(Value::as_str) {
-            Some("ready") => open_window(app, &event)?,
+            Some("ready") => {
+                if let Some(version) = event.get("version").and_then(Value::as_str) {
+                    eprintln!("[dsh-tauri] DSH Desktop {version}");
+                }
+                open_window(app, &event)?
+            }
             // Host events carry credentials (platform tokens) and bulky payloads:
             // log the kind only, never the body.
             Some("host") => {

@@ -74,3 +74,14 @@ CI（`.github/workflows/build.yml`）在每次 push 上跑同样的命令并把�
 - 主窗有焦点时不打扰；
 - 文案走 `shell_ui::notification_text`（回合完成用消息本身，其它用固定句子，中英按 `LANG`），
   再交给 `notify-send` 发系统通知。
+
+## 上游契约漂移
+
+外壳不打包 Host，只在每次启动时读取本机安装，所以 DSH Desktop 升级后无需重打包。风险在于
+上游可能改动桌面契约（认证头名、index 注入、Host 参数）。为此：
+
+- `bridge/asar.mjs` 从 `app.asar` 里读 `package.json` 的版本，`ready` 事件带 `version`，
+  Rust 侧打印 `[dsh-tauri] DSH Desktop <version>`；
+- 认证失败等错误消息里带上该版本，并提示运行 `node tools/probe-bridge.mjs`；
+- 升级 DSH Desktop 后跑一次 `node tools/probe-bridge.mjs`，四项（认证 / 反代 / `/` 文档 /
+  WebSocket 101）全过即契约未变；`docs/CONTRACT.md` 记录了断言的来源行号，便于重新核对。
