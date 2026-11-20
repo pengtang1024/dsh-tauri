@@ -355,6 +355,21 @@ function send(message) {
   }
 }
 
+/**
+ * Complete a Platform sign-in: the Host's OAuth callback has to be replayed as
+ * the native renderer (cookie + renderer token), which is exactly what the
+ * loopback proxy does — so route it through the proxy instead of the WebView.
+ * @param callbackUrl - callback URL the sign-in window tried to navigate to.
+ */
+async function finishPlatformLogin(callbackUrl) {
+  if (proxyOrigin === undefined) throw new Error('the proxy is not running yet');
+  const source = new URL(callbackUrl);
+  const target = new URL(source.pathname + source.search, proxyOrigin);
+  const response = await fetch(target, { redirect: 'manual' });
+  await response.body?.cancel();
+  emit({ type: 'platform-login-done', status: response.status });
+}
+
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on('line', (line) => {
   const text = line.trim();
@@ -375,6 +390,11 @@ input.on('line', (line) => {
       break;
     case 'ping':
       emit({ type: 'pong', id: command.id ?? null });
+      break;
+    case 'platform-callback':
+      finishPlatformLogin(command.url).catch((error) =>
+        emit({ type: 'platform-login-done', status: 0, error: String(error.message ?? error) })
+      );
       break;
     default:
       emit({ type: 'error', message: `host bridge: unknown command ${String(command?.type)}` });

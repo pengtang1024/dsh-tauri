@@ -21,6 +21,37 @@ struct Session {
 }
 
 static SESSION: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+/// Origins learned from the Host's `ready` event: the loopback proxy the window
+/// loads, and the Host origin that Platform sign-in callbacks belong to.
+static PROXY_ORIGIN: Mutex<Option<String>> = Mutex::new(None);
+static HOST_ORIGIN: Mutex<Option<String>> = Mutex::new(None);
+
+fn remember_origins(proxy: &str, host: &str) {
+    if let Ok(mut guard) = PROXY_ORIGIN.lock() {
+        *guard = Some(proxy.to_owned());
+    }
+    if let Ok(mut guard) = HOST_ORIGIN.lock() {
+        *guard = Some(host.to_owned());
+    }
+}
+
+/// Origin of the Host, once the bridge has reported it.
+pub fn host_origin() -> Option<String> {
+    HOST_ORIGIN.lock().ok()?.clone()
+}
+
+/// Send a command that is not meant for the Host IPC channel.
+fn send_command(message: &Value) -> Result<(), String> {
+    let session = SESSION.get().ok_or("bridge is not running")?;
+    let mut guard = session.lock().map_err(|_| "bridge session lock is poisoned")?;
+    let session = guard.as_mut().ok_or("bridge has exited")?;
+    let line = message.to_string();
+    session
+        .stdin
+        .write_all(format!("{line}\n").as_bytes())
+        .and_then(|()| session.stdin.flush())
+        .map_err(|error| format!("cannot write to the bridge: {error}"))
+}
 
 /// Everything the bridge needs to boot the desktop Host.
 pub struct Config {
@@ -201,7 +232,17 @@ fn run(app: &AppHandle) -> Result<(), String> {
             Some("ready") => open_window(app, &event)?,
             // Host events carry credentials (platform tokens) and bulky payloads:
             // log the kind only, never the body.
-            Some("host") => eprintln!("[dsh-tauri] host event: {}", host_event_kind(&event)),
+            Some("host") => {
+                eprintln!("[dsh-tauri] host event: {}", host_event_kind(&event));
+                handle_host_event(app, event.get("message"));
+            }
+            Some("platform-login-done") => {
+                eprintln!(
+                    "[dsh-tauri] platform sign-in callback: status {}",
+                    event.get("status").and_then(Value::as_u64).unwrap_or(0)
+                );
+                close_login_window(app);
+            }
             Some("error") => eprintln!("[dsh-tauri] bridge: {}", event.get("message").and_then(Value::as_str).unwrap_or("unknown error")),
             Some("title") => set_window_title(app, event.get("title").and_then(Value::as_str).unwrap_or("")),
             Some("exit") => break,
@@ -209,6 +250,48 @@ fn run(app: &AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// React to Host events that need shell furniture rather than the WebView.
+fn handle_host_event(app: &AppHandle, message: Option<&Value>) {
+    let Some(message) = message else { return };
+    if message.get("type").and_then(Value::as_str) != Some("platform-login") {
+        return;
+    }
+    match message.get("action").and_then(Value::as_str) {
+        Some("open") => {
+            let Some(url) = message.get("url").and_then(Value::as_str) else { return };
+            let handle = app.clone();
+            let url = url.to_owned();
+            let _ = app.run_on_main_thread(move || {
+                if let Err(error) = crate::shell_ui::build_login_window(&handle, &url) {
+                    eprintln!("[dsh-tauri] cannot open the sign-in window: {error}");
+                }
+            });
+        }
+        Some("close") => close_login_window(app),
+        _ => {}
+    }
+}
+
+fn close_login_window(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("login") {
+            let _ = window.close();
+        }
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.set_focus();
+        }
+    });
+}
+
+/// Ask the bridge to replay a Platform sign-in callback through the proxy.
+pub fn complete_platform_login(url: &str) {
+    let command = serde_json::json!({ "type": "platform-callback", "url": url });
+    if let Err(error) = send_command(&command) {
+        eprintln!("[dsh-tauri] cannot complete the Platform sign-in: {error}");
+    }
 }
 
 fn set_window_title(app: &AppHandle, title: &str) {
@@ -229,6 +312,26 @@ fn open_window(app: &AppHandle, ready: &Value) -> Result<(), String> {
     let parsed = Url::parse(url).map_err(|error| format!("invalid bridge url {url}: {error}"))?;
     let handle = app.clone();
     let url_for_log = url.to_owned();
+    let host_url = ready.get("hostUrl").and_then(Value::as_str).unwrap_or("");
+    let proxy_origin = parsed.origin().ascii_serialization();
+    if let Ok(host) = Url::parse(host_url) {
+        let host_origin = host.origin().ascii_serialization();
+        remember_origins(&proxy_origin, &host_origin);
+        eprintln!("[dsh-tauri] host origin {host_origin}");
+    }
+    // Development hook: open the sign-in window up front to exercise the OAuth
+    // callback relay without waiting for the Host to ask for a sign-in.
+    if let Ok(login) = std::env::var("DSH_TAURI_OPEN_LOGIN") {
+        if !login.is_empty() {
+            let handle = app.clone();
+            let parsed = login;
+            let _ = app.run_on_main_thread(move || {
+                if let Err(error) = crate::shell_ui::build_login_window(&handle, &parsed) {
+                    eprintln!("[dsh-tauri] cannot open the sign-in window: {error}");
+                }
+            });
+        }
+    }
     app.run_on_main_thread(move || {
         if let Some(existing) = handle.get_webview_window("main") {
             let _ = existing.navigate(parsed);

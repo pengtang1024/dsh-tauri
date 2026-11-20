@@ -187,6 +187,34 @@ fn urlencoding(message: &str) -> String {
     encoded
 }
 
+/**
+ * Open the Platform sign-in window.
+ *
+ * The page is a normal HTTPS site; the only special part is the last hop — when
+ * it navigates to the Host's `/oauth/callback`, the request has to be replayed
+ * as the native renderer, so the bridge does it through the loopback proxy and
+ * this window is closed once that settles.
+ */
+pub fn build_login_window(app: &AppHandle<Wry>, url: &str) -> Result<WebviewWindow<Wry>, String> {
+    let target = tauri::Url::parse(url).map_err(|error| format!("invalid sign-in url: {error}"))?;
+    let host_origin = crate::bridge::host_origin().unwrap_or_default();
+    let window = WebviewWindowBuilder::new(app, "login", tauri::WebviewUrl::External(target))
+        .title("登录 DeepSeek")
+        .inner_size(520.0, 760.0)
+        .on_navigation(move |url| {
+            let is_callback = url.path() == "/oauth/callback"
+                && (host_origin.is_empty() || url.origin().ascii_serialization() == host_origin);
+            if is_callback {
+                crate::bridge::complete_platform_login(url.as_str());
+                return false;
+            }
+            true
+        })
+        .build()
+        .map_err(|error| format!("cannot open the sign-in window: {error}"))?;
+    Ok(window)
+}
+
 /// Build the main window with the remembered geometry and shared menu.
 pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<WebviewWindow<Wry>, String> {
     let state = load_window_state();

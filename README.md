@@ -111,6 +111,8 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 - 反向代理：`GET /` 200 且是真客户端 HTML；`/plugins/**` 不缓存；
 - WebSocket：`/api/remote.mux` 经代理返回 **101** 并保持长连接（会话与终端流实时刷新）；
 - 桌面模式：`dshDesktopBoot.ready()` 打通，`__DSH_TRANSPORT__.ownsHost` 生效；
+- 平台登录：Host 发来 `platform-login{action:open}` 时开登录窗；登录窗跳回 Host 的
+  `/oauth/callback` 时由 bridge 以原生渲染器身份经代理重放（实测回调 404 → 窗口自动关闭）；
 - 窗口标题跟随文档标题（`document.title` → 原生标题栏，实测从 `DSH` 变为 `DeepSeek Harness`）；
 - 原生 API：`/__dsh_tauri__/info`、`/preferences`、`/permissions` 实测返回；
   目录选择走 zenity，剪贴板走 wl-copy/wl-paste，通知走 notify-send，外链走 xdg-open。
@@ -125,7 +127,7 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 | 原生菜单栏 | 已实现：编辑 / 查看 / 窗口（GTK 菜单，随窗口显示） |
 | 拖拽文件取绝对路径（`__DSH_HOST_PATHS__`） | 已实现：落点被拦截后把文件复制到 `~/.dsh/dsh-tauri-drops/` 并回传绝对路径；复制而非原地引用，文件后续改动不会同步 |
 | 打包（.deb / AppImage / 图标 / .desktop） | 已实现：`npm run build` 产出 `.deb` 与 AppImage，CI 上传为构建产物 |
-| 平台页（用量 / 充值，`dshPlatform`） | 未实现：账号额度页的「去充值」入口在桌面模式下被客户端隐藏，需在网页端操作 |
+| 平台页内嵌视图（用量 / 充值，`dshPlatform`） | 未实现：账号额度页的「去充值」入口在桌面模式下被客户端隐藏，需在网页端操作 |
 | 桌面引导 / 首次运行迁移（`dshDesktop`、`dshDesktopSetup`） | 未实现：登录走网页流程，客户端有回退路径 |
 | 应用内账号子窗（`dshPlatform` + 凭据注入） | 未实现，见上一条 |
 | 自动更新 | 未实现，建议随官方安装一起升级 |

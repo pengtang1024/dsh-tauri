@@ -157,3 +157,20 @@ Shell → host: `{type:"permission-result",requestId,snapshot|error}`,
   requests and WebSocket handshakes) instead of a custom protocol.
 - `browserAccess` is a user preference; the shell must not flip it silently —
   the proxy exists precisely so it does not have to.
+
+## Platform 登录（`platform-login`）
+
+Host 在账号需要登录时通过 fork IPC 发 `{type:'platform-login', action:'open', url}`
+（Host 侧来源：`reference-upstream/lib/host.js:570` 的 `watchPlatformLogin`）。`action:'close'`
+表示登录窗该关掉，带 `focus:boolean`。
+
+官方 Electron 用独立分区窗口（`main.js:3777` `PLATFORM_LOGIN_PARTITION='dsh-platform-login'`，
+无 `persist:` 前缀，避免 Platform cookie 落盘），并在 `webRequest` 里拦截导航
+（`classifyPlatformLoginRequest`）：只放行 https 与 about/data/blob 子资源，Host 同源的
+`/oauth/callback` 必须由外壳以「原生渲染器」（`Cookie` + `x-dsh-desktop-renderer`）重放
+（`forwardPlatformLoginCallback`，`CALLBACK_TIMEOUT=15min`）。
+
+本项目的做法：Tauri 开一个 `login` 窗口加载该 URL，`on_navigation` 检测到
+`/oauth/callback` 且 origin 等于 Host origin 时取消导航，把 URL 交给 bridge
+（stdin `{type:'platform-callback'}`），bridge 经回环代理重放同一路径 —— 代理本来就补
+cookie 与渲染器令牌，等价于官方的重放；拿到状态码后回到 Rust，关掉登录窗。
