@@ -7,6 +7,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -137,7 +138,8 @@ fn run(app: &AppHandle) -> Result<(), String> {
 
 /// One server lifetime. `None` means the shell asked it to stop.
 fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> {
-    let mut child = Command::new(&config.node)
+    let mut command = Command::new(&config.node);
+    command
         .arg(&config.entry)
         .arg("--profile")
         .arg(&config.profile)
@@ -149,15 +151,28 @@ fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> 
         .env("DSH_HOME", &config.home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // If the shell dies (crash, logout, SIGKILL) the server must follow it
+    // instead of staying behind holding the port and the profile.
+    // SAFETY: between fork and exec only async-signal-safe calls are made, and
+    // `prctl` passes an integer flag and constant signal number.
+    let spawn = unsafe {
+        command.pre_exec(|| {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        })
         .spawn()
-        .map_err(|error| {
-            format!(
-                "cannot start `{} {}`: {error}\n\n安装 Node 24+（或在 DSH_TAURI_NODE 指定路径），然后重试。",
-                config.node.display(),
-                config.entry.display()
-            )
-        })?;
+    };
+    let mut child = spawn.map_err(|error| {
+        format!(
+            "cannot start `{} {}`: {error}\n\n安装 Node 24+（或在 DSH_TAURI_NODE 指定路径），然后重试。",
+            config.node.display(),
+            config.entry.display()
+        )
+    })?;
 
     let stdout = child.stdout.take().ok_or("DSH stdout is unavailable")?;
     let stderr = child.stderr.take().ok_or("DSH stderr is unavailable")?;
@@ -257,4 +272,21 @@ pub fn info(app: &AppHandle) -> serde_json::Value {
         "profile": config.as_ref().map(|config| config.profile.clone()),
         "desktopVersion": option_env!("CARGO_PKG_VERSION")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_url;
+
+    #[test]
+    fn reads_the_url_from_the_runtime_banner() {
+        let line = "dsh web: http://127.0.0.1:44123/?token=abc-DEF_123";
+        assert_eq!(web_url(line).as_deref(), Some("http://127.0.0.1:44123/?token=abc-DEF_123"));
+    }
+
+    #[test]
+    fn ignores_lines_without_a_url() {
+        assert_eq!(web_url("[dsh] loading plugins"), None);
+        assert_eq!(web_url("http://"), None);
+    }
 }

@@ -283,3 +283,18 @@ fn urlencoding(value: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::urlencoding;
+
+    #[test]
+    fn escapes_everything_except_unreserved_bytes() {
+        assert_eq!(urlencoding("a b\nc/d"), "a%20b%0Ac%2Fd");
+    }
+
+    #[test]
+    fn keeps_plain_text_readable() {
+        assert_eq!(urlencoding("DSH-2.0.24"), "DSH-2.0.24");
+    }
+}
