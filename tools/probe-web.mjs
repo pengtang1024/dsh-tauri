@@ -17,9 +17,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const runtime = process.env.DSH_TAURI_RUNTIME ?? join(root, 'runtime');
+const flag = (name, fallback) => {
+  const index = process.argv.indexOf(`--${name}`);
+  return index === -1 ? fallback : process.argv[index + 1];
+};
+const runtime = flag('runtime', process.env.DSH_TAURI_RUNTIME ?? join(root, 'runtime'));
 const entry = join(runtime, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-const profile = process.argv.includes('--profile') ? process.argv[process.argv.indexOf('--profile') + 1] : 'web';
+const profile = flag('profile', 'web');
 
 if (!existsSync(entry)) {
   console.error(`missing runtime: ${entry}\n run: npm install --prefix runtime @deepseek-ai/dsh`);
