@@ -1,5 +1,10 @@
 # 更新记录
 
+## 0.2.1
+
+- 修复打包：`bridge/asar.mjs` 没有随包发布，导致安装版启动时报 `ERR_MODULE_NOT_FOUND`；
+  resources 改为按 `bridge/*.mjs`、`bridge/*.js` 收集，新增文件不会再漏
+
 ## 0.2.0
 
 - 识别上游版本：启动日志打印 `[dsh-tauri] DSH Desktop <version>`，认证失败时错误消息带版本
