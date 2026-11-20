@@ -55,6 +55,58 @@
     }
   };
 
+  /**
+   * Absolute paths for dropped files. Electron answered this synchronously from
+   * `webUtils.getPathForFile`; WebKit exposes no path at all, so staged copies
+   * are keyed by the identity a `File` does expose (name, size, mtime).
+   */
+  const staged = new Map();
+  const fileKey = (file) => `${file.name}:${file.size}:${file.lastModified}`;
+
+  window.__DSH_HOST_PATHS__ = {
+    pathFor(file) {
+      return staged.get(fileKey(file));
+    }
+  };
+
+  const stageDrop = async (files) => {
+    for (const file of files) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+      const result = await call('/stage-file', { name: file.name, dataBase64: btoa(binary) });
+      if (typeof result?.path === 'string') staged.set(fileKey(file), result.path);
+    }
+  };
+
+  /**
+   * Intercept real drops, stage the payload, then re-dispatch an equivalent drop
+   * so the client's own handler runs with paths available. Staging failures are
+   * swallowed on purpose: the client falls back to uploading file contents.
+   */
+  window.addEventListener(
+    'drop',
+    (event) => {
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length === 0 || typeof DataTransfer !== 'function') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const target = event.target;
+      const init = { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() };
+      (async () => {
+        try {
+          await stageDrop(files);
+          for (const file of files) init.dataTransfer.items.add(file);
+        } catch {
+          return;
+        }
+        target?.dispatchEvent(new DragEvent('drop', init));
+      })();
+    },
+    true
+  );
+
   /** Permission plumbing for the settings screen; the Host still owns policy. */
   window.desktopNext = {
     renderer: {

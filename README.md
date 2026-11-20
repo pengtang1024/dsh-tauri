@@ -73,6 +73,14 @@ node tools/probe-host.mjs      # 直连 Host：认证 / 反代 / 注入
 node tools/probe-bridge.mjs    # 完整链路：bridge + 回环反代 + WebSocket
 ```
 
+测试与桥接自检：
+
+```bash
+npm test                       # shell API 路由测试（stage-file / 404 / 前缀隔离）
+npm run check                  # 三个 bridge 脚本的语法检查
+node tools/probe-bridge.mjs    # 真实拉起 Host，验证认证、反代与 WebSocket
+```
+
 `cargo run` 会自动发现官方安装；如需指定：
 
 ```bash
@@ -113,7 +121,7 @@ docs/CONTRACT.md          逆向出来的官方外壳契约
 | 托盘 / 关闭到托盘 | 未实现（偏好项已读取，尚未接线） |
 | 原生菜单栏 | 未实现 |
 | 应用内账号窗口（`dshPlatform`） | 未实现，账号页回退到网页路径 |
-| 拖拽文件取绝对路径（`__DSH_HOST_PATHS__`） | 未实现，回退为上传文件内容 |
+| 拖拽文件取绝对路径（`__DSH_HOST_PATHS__`） | 已实现：落点被拦截后把文件复制到 `~/.dsh/dsh-tauri-drops/` 并回传绝对路径；复制而非原地引用，文件后续改动不会同步 |
 | 桌面引导 / 账号迁移（`dshDesktopSetup`） | 未实现，登录回退到网页流程 |
 | 打包（.deb / AppImage / 图标 / .desktop） | 配置已就绪，尚未接入发布流水线 |
 | 自动更新 | 未实现，建议随官方安装一起升级 |

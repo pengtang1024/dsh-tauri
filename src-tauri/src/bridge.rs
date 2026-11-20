@@ -94,17 +94,20 @@ impl Config {
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| format!("unexpected app root {}", root.display()))?;
-        // Packaged builds carry the bridge under the resource directory; a
-        // development checkout uses the sibling `bridge/` folder.
+        // A checkout wins over bundled resources so `cargo run` follows the
+        // working tree; packaged installs only ship the resource copy.
         let bridge = env_path("DSH_TAURI_BRIDGE")
+            .or_else(|| {
+                let checkout =
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("bridge").join("host-bridge.mjs");
+                checkout.exists().then_some(checkout)
+            })
             .or_else(|| {
                 app.and_then(|handle| handle.path().resource_dir().ok())
                     .map(|dir| dir.join("bridge").join("host-bridge.mjs"))
                     .filter(|path| path.exists())
             })
-            .unwrap_or_else(|| {
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("bridge").join("host-bridge.mjs")
-            });
+            .ok_or_else(|| "cannot locate bridge/host-bridge.mjs; set DSH_TAURI_BRIDGE".to_owned())?;
         let home = env_path("DSH_HOME").unwrap_or_else(|| home_dir().join(".dsh"));
         let node = env_path("DSH_TAURI_NODE")
             .or_else(|| {

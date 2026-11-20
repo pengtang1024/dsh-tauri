@@ -11,12 +11,17 @@
  * loaded client plugin reads it.
  */
 import { execFile } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 const BASE = '/__dsh_tauri__';
 const PREFERENCES_FILE = join(homedir(), '.dsh', 'desktop-preferences.json');
+/** Dropped files are copied here so the Host can read them by absolute path. */
+const DROP_DIR = join(homedir(), '.dsh', 'dsh-tauri-drops');
+/** Refuse blobs above this size: staging is a copy, not a streaming upload. */
+const MAX_STAGE_BYTES = 256 * 1024 * 1024;
 
 /** Run a GUI helper, resolving with its trimmed stdout; rejects with stderr. */
 function run(command, args, options = {}) {
@@ -72,6 +77,25 @@ const routes = {
       if (String(error.message).includes('cancel')) return { path: null };
       throw error;
     }
+  },
+
+  /**
+   * Copy a dropped file into the drop directory and return its absolute path.
+   * The renderer cannot learn real paths from a `File`, so the shim stages the
+   * bytes here and remembers the mapping; this is what makes attaching a local
+   * file work without the Electron `webUtils.getPathForFile` helper.
+   */
+  'POST /stage-file': async (body) => {
+    const raw = typeof body?.name === 'string' ? body.name : '';
+    const name = basename(raw).replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+    if (name === '' || name.startsWith('.')) throw new Error('refusing to stage a file without a usable name');
+    const data = typeof body?.dataBase64 === 'string' ? Buffer.from(body.dataBase64, 'base64') : Buffer.alloc(0);
+    if (data.length === 0) throw new Error('staged file is empty');
+    if (data.length > MAX_STAGE_BYTES) throw new Error('staged file is too large');
+    const target = join(DROP_DIR, randomUUID(), name);
+    mkdirSync(join(target, '..'), { recursive: true });
+    writeFileSync(target, data);
+    return { path: target, size: statSync(target).size };
   },
 
   'POST /open-external': async (body) => {

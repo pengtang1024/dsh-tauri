@@ -35,6 +35,9 @@ jobs:
       - name: Install the Tauri CLI
         run: npm ci
 
+      - name: Test the shell API
+        run: npm test
+
       - name: Build the .deb bundle
         run: npx tauri build --bundles deb
 

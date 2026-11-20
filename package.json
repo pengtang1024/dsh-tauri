@@ -10,7 +10,8 @@
     "build:deb": "tauri build --bundles deb",
     "probe:host": "node tools/probe-host.mjs",
     "probe:bridge": "node tools/probe-bridge.mjs",
-    "check": "node --check bridge/host-bridge.mjs && node --check bridge/shell-api.mjs && node --check bridge/renderer-shim.js"
+    "check": "node --check bridge/host-bridge.mjs && node --check bridge/shell-api.mjs && node --check bridge/renderer-shim.js",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
