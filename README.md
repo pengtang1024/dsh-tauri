@@ -80,6 +80,17 @@ npm install --prefix ~/.dsh/dsh-tauri/runtime @deepseek-ai/dsh
 
 外壳会按「`DSH_TAURI_RUNTIME` → 仓库内 `runtime/` → `~/.dsh/dsh-tauri/runtime`」依次查找。
 
+### 更新上游 Harness
+
+外壳不锁定 Harness 版本，升级就是升级那个 npm 包：
+
+```bash
+npm install --prefix ~/.dsh/dsh-tauri/runtime @deepseek-ai/dsh@latest
+```
+
+重启应用即可生效；`node tools/probe-web.mjs --runtime ~/.dsh/dsh-tauri/runtime`
+可以先验证新版本的登录与首屏契约是否仍然成立。
+
 ## 目录
 
 ```
