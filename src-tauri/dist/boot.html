@@ -10,19 +10,58 @@
     background: #0b0d12; color: #d7dbe3;
     font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif;
     display: grid; place-content: center; justify-items: center; gap: 18px;
+    padding: 0 32px; text-align: center;
   }
   .logo { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, #2b6ef6, #7c4dff);
           display: grid; place-content: center; font-weight: 700; font-size: 26px; color: #fff }
   .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #2a2f3a; border-top-color: #5b8cff;
              animation: spin 900ms linear infinite }
   @keyframes spin { to { transform: rotate(360deg) } }
-  .hint { color: #7b8494; font-size: 13px }
+  .hint { color: #7b8494; font-size: 13px; max-width: 640px; white-space: pre-wrap }
 </style>
 </head>
 <body>
   <div class="logo">D</div>
-  <div>正在启动 DSH 服务…</div>
-  <div class="spinner"></div>
-  <div class="hint">首次启动需要初始化插件，通常几秒到半分钟</div>
+  <div id="stage">正在启动 DSH 服务…</div>
+  <div class="spinner" id="spinner"></div>
+  <div class="hint" id="hint">首次启动需要初始化插件，通常几秒到半分钟</div>
+  <script>
+    // The splash polls the shell for its boot stage (no eval injection): during
+    // a first launch this is how the automatic npm install becomes visible.
+    (() => {
+      const stageEl = document.getElementById('stage');
+      const hintEl = document.getElementById('hint');
+      const spinner = document.getElementById('spinner');
+      const hints = {
+        locating: '正在查找已安装的 DSH 运行时',
+        installing: '首次启动会自动安装 @deepseek-ai/dsh，约需 1–2 分钟，请不要关闭窗口',
+        starting: '服务正在启动，插件加载完成后会自动进入界面',
+        ready: '马上进入界面…',
+        updating: '启动后会在后台检查并下载更新',
+        error: ''
+      };
+      const describe = (status) => {
+        if (!status) return;
+        const elapsed = Number(status.elapsedSecs || 0);
+        if (status.stage === 'error') {
+          stageEl.textContent = 'DSH 启动失败';
+          hintEl.textContent = status.error || status.message || '未知错误';
+          spinner.style.display = 'none';
+          return;
+        }
+        stageEl.textContent = (status.message || '正在启动 DSH 服务…') + '（已用 ' + elapsed + ' 秒）';
+        hintEl.textContent = hints[status.stage] || '';
+      };
+      const poll = () => {
+        const core = globalThis.__TAURI__ && globalThis.__TAURI__.core;
+        if (!core) return;
+        core.invoke('runtime_status').then(describe).catch(() => {
+          hintEl.textContent = '与外壳通信失败，请重启应用';
+        });
+      };
+      poll();
+      setInterval(poll, 500);
+    })();
+  </script>
 </body>
 </html>

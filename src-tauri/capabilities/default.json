@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities of the main window that hosts the DSH web application.",
-  "windows": ["main"],
+  "description": "Capabilities of the shell windows: the main window that hosts the DSH web application, and the splash that polls the boot progress.",
+  "windows": ["main", "splash"],
   "permissions": ["core:default"]
 }

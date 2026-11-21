@@ -56,7 +56,7 @@ sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
 ## 构建与运行
 
 ```bash
-npm install --prefix runtime @deepseek-ai/dsh   # 装 Harness 本体（约 1.2GB）
+npm install --prefix runtime @deepseek-ai/dsh   # 仅开发用：让 probe / 本仓库内启动拿到本体
 npm test                                        # 运行时契约探针
 
 cd src-tauri && cargo run
@@ -72,36 +72,74 @@ cd src-tauri && cargo run
 | `DSH_HOME` | 数据目录（默认 `~/.dsh`） |
 | `DSH_TAURI_URL` | 开发用：直接打开已在运行的服务，不自己 spawn |
 
-打包（deb / AppImage）用 `npx tauri build`，不随包分发 `node_modules`：装好后执行一次
+打包（deb / AppImage）用 `npx tauri build`，不随包分发 `node_modules`：
+**首次启动会自动安装**，把 `@deepseek-ai/dsh` 装进 `~/.dsh/dsh-tauri/runtime`，
+期间 splash 会显示阶段（查找 / 安装 / 启动）与已用时，不需要你先跑任何命令。
+
+外壳会按「`DSH_TAURI_RUNTIME` → 仓库内 `runtime/` → `~/.dsh/dsh-tauri/runtime`」依次查找。
+只有在**离线**时才需要手动装一次：
 
 ```bash
 npm install --prefix ~/.dsh/dsh-tauri/runtime @deepseek-ai/dsh
 ```
 
-外壳会按「`DSH_TAURI_RUNTIME` → 仓库内 `runtime/` → `~/.dsh/dsh-tauri/runtime`」依次查找。
+### 自动更新
 
-### 更新上游 Harness
+服务起来之后，外壳会开一个后台线程跑 `npm view @deepseek-ai/dsh version`，
+发现上游版本比本地新就自动装进同一个运行时目录，装完用 `notify-send`
+提示「已更新到 <版本>，重启生效」。
 
-外壳不锁定 Harness 版本，升级就是升级那个 npm 包：
+- **不打断当前会话**：正在跑的服务不会被杀，旧目录改名为
+  `<runtime>.old-<pid>` 继续供它读取，新版本**下次启动**才加载
+- **失败静默重试**：检查或安装失败只写一行日志（`[runtime] 更新检查失败（下次启动再试）`），
+  不弹窗、不影响使用，下次启动重新尝试
+- **只更新自己装的目录**：`DSH_TAURI_RUNTIME` 指定的目录和仓库内 `runtime/`
+  属于用户或 git 管理，外壳只记日志不写入
+- **开关**（环境变量）：
+
+  | 变量 | 作用 |
+  | --- | --- |
+  | `DSH_TAURI_AUTO_UPDATE=0` | 关掉版本检查，首次启动的自动安装照常 |
+  | `DSH_TAURI_OFFLINE=1` | 关掉全部网络行为（安装 + 检查），离线也能启动已有运行时 |
+
+手动升级仍然可行，等价于让外壳不做：
 
 ```bash
 npm install --prefix ~/.dsh/dsh-tauri/runtime @deepseek-ai/dsh@latest
+node tools/probe-web.mjs --runtime ~/.dsh/dsh-tauri/runtime   # 升级后先验契约
 ```
-
-重启应用即可生效；`node tools/probe-web.mjs --runtime ~/.dsh/dsh-tauri/runtime`
-可以先验证新版本的登录与首屏契约是否仍然成立。
 
 ## 目录
 
 ```
 src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
+src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
+src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
+src-tauri/src/update.rs     启动后后台 `npm view` 比对版本、自动装新、notify-send
+src-tauri/src/swap.rs       `.new-<pid>` 暂存 + 原子 rename，启动时清理 `.old-*`
+src-tauri/src/progress.rs   启动阶段与已用时（splash 轮询）
+src-tauri/src/exec.rs       带超时的子进程执行（整组进程一起收）
+src-tauri/src/version.rs    语义化版本比较
+src-tauri/src/supervisor.rs 监督线程：定位 → 安装 → 启动
+src-tauri/src/banner.rs     从服务日志里解析 URL
 src-tauri/src/native.rs     原生命令 + 注入脚本
-src-tauri/src/shell_ui.rs   窗口、菜单、托盘、窗口状态、错误页
+src-tauri/src/shell_ui.rs   窗口、菜单、托盘、splash、错误页
 src-tauri/src/single_instance.rs  单实例（Unix socket）
 runtime/                    仅开发用：本地安装的 @deepseek-ai/dsh
 tools/probe-web.mjs         运行时契约探针
 docs/DEVELOPMENT.md         开发与验证手册
 ```
+
+## 能力对照
+
+| 能力 | 实现方式 |
+| --- | --- |
+| 会话 / 工作区 / 插件 | 官方 Web UI，加载自 `dsh web` |
+| 目录选择、剪贴板、通知、外链 | 注入脚本 + Tauri 命令 |
+| 窗口标题、尺寸、托盘、单实例 | `shell_ui.rs` / `single_instance.rs` |
+| 崩溃自动重启 | `dsh.rs`，最多 3 次后错误页 |
+| 运行时安装/更新 | 自动（首次启动安装，启动后自动检查更新） |
+| 启动进度 | splash 轮询 `runtime_status`：阶段 + 已用时 |
 
 ## 已验证（Linux + WebKitGTK 2.52）
 
@@ -112,17 +150,23 @@ docs/DEVELOPMENT.md         开发与验证手册
 - 窗口会随 `document.title` 改名；关闭按偏好走「关到托盘」或「退出」；重启恢复尺寸；
 - 第二次启动会聚焦已有窗口后退出，不会起第二个服务；
 - 服务被杀后自动重启（最多 3 次），仍失败则显示可读的错误页；
-- 找不到运行时会显示带修复命令的错误页，而不是空白窗口。
+- 首次启动没有运行时会自动 `npm install` 到 `~/.dsh/dsh-tauri/runtime`，
+  splash 显示当前阶段与已用时；
+- 装完自动起服务；有上游新版时后台安装并用 `notify-send` 提示「重启生效」，
+  正在跑的服务不受影响；
+- `DSH_TAURI_OFFLINE=1` 且本地无运行时，显示带手动命令的错误页而不是空白窗口；
+- 更新走 `<runtime>.new-<pid>` 暂存目录 + 原子替换，安装中断不会破坏已装好的运行时。
 
 ## 已知限制
 
 | 项 | 现状 |
 | --- | --- |
 | 平台页内嵌视图（用量 / 充值） | 走浏览器打开，未做原生内嵌 |
-| 自动更新 | 未做，随发行版或 `npm` 升级 |
+| 更新后的旧运行时占盘 | 旧树改名 `<runtime>.old-<pid>` 保留给仍在跑的服务，**到下次启动才清理**；期间多占约一份运行时的空间（约 1.2G） |
+| SIGKILL 残留 | 外壳被 `SIGKILL` 时来不及收子进程，npm 的 `postinstall` 孙进程可能短暂残留；正常退出（SIGTERM）不受影响 |
 | Windows / macOS | 代码按 Linux 原生命令编写（zenity/wl-clipboard/notify-send），其它平台需要替换这几处 |
 | Wayland 窗口位置 | 由合成器决定，`position()` 只影响 X11 风格合成器 |
-| 首启动等待 | 服务启动期间显示 splash，不显示进度细节 |
+| 首启动等待 | 能看阶段与已用时，但没有逐行 npm 输出 |
 
 ## 说明
 

@@ -1,5 +1,22 @@
 # 更新记录
 
+## 0.4.0
+
+- **首次启动自动安装**：缺运行时不再让人手动 `npm install`，外壳自己把
+  `@deepseek-ai/dsh` 装到 `~/.dsh/dsh-tauri/runtime`，装完直接起服务
+- **启动后自动更新**：服务起来后在后台跑 `npm view` 比对版本，有新版自动安装并用
+  `notify-send` 提示「重启生效」；正在跑的服务不会被杀，新版本下次启动才加载
+- **原子替换**：安装写在同目录的 `<runtime>.new-<pid>` 暂存目录，成功后才 `rename`
+  换上去；失败或中断时旧运行时原样保留，不会出现半装的 `node_modules`
+- **启动进度**：splash 显示当前阶段（查找 / 安装 / 启动 / 更新）与已用时，出问题时显示
+  可读错误页与手动修复命令
+- **两个开关**：`DSH_TAURI_AUTO_UPDATE=0` 只关版本检查、`DSH_TAURI_OFFLINE=1` 同时关掉
+  安装与检查（离线也能启动已有运行时）
+- **旧运行时保留到下次启动清理**：更新后旧树改名为 `<runtime>.old-<pid>` 供仍在跑的
+  服务继续读取，下次启动时统一清掉 `.new-*` / `.old-*`
+- 新增模块 `runtime` / `install` / `update` / `swap` / `progress` / `exec` / `version` /
+  `supervisor` / `banner`，`shell_ui` 增加 splash 与错误页
+
 ## 0.3.0
 
 - **换本体**：不再驱动 `/opt/DSH NEXT` 的 Electron 安装，改为拉起 npm 上的

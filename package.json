@@ -1,6 +1,6 @@
 {
   "name": "dsh-tauri",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "private": true,
   "description": "Tauri 2 shell for DeepSeek Harness Desktop: keeps desktop mode, live streams and native bridges without Electron.",
   "license": "MIT",

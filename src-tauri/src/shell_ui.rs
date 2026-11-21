@@ -136,7 +136,7 @@ pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "quit" => {
-                crate::dsh::shutdown();
+                crate::supervisor::shutdown();
                 app.exit(0);
             }
             _ => {}
@@ -235,23 +235,51 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
     Ok(window)
 }
 
+/// Open the window on the server URL, or navigate the existing one after a
+/// restart. The splash is destroyed once the real UI is up.
+pub fn show_url(app: &AppHandle<Wry>, url: &str) -> Result<(), String> {
+    let parsed: tauri::Url = url.parse().map_err(|error| format!("bad URL from DSH: {error}"))?;
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.navigate(parsed);
+            let _ = window.set_focus();
+            return;
+        }
+        if let Err(error) = build_main_window(&handle, parsed) {
+            eprintln!("[dsh-tauri] {error}");
+        }
+    })
+    .map_err(|error| format!("cannot reach the main thread: {error}"))
+}
+
 /// Show a readable failure page instead of a blank window.
 pub fn show_error(app: &AppHandle<Wry>, message: &str) -> Result<(), String> {
-    let handle = app.clone();
     let encoded = urlencoding(message);
-    if let Some(window) = handle.get_webview_window("main") {
-        let target: tauri::Url = format!("tauri://localhost/error.html#{encoded}")
-            .parse()
-            .map_err(|error| format!("bad error URL: {error}"))?;
-        return window.navigate(target).map_err(|error| format!("cannot show the error page: {error}"));
+    let shown = match app.get_webview_window("main") {
+        Some(window) => {
+            let target: tauri::Url = format!("tauri://localhost/error.html#{encoded}")
+                .parse()
+                .map_err(|error| format!("bad error URL: {error}"))?;
+            window.navigate(target).map_err(|error| format!("cannot show the error page: {error}"))
+        }
+        None => {
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(format!("error.html#{encoded}").into()))
+                .title("DSH")
+                .inner_size(760.0, 560.0)
+                .build()
+                .map_err(|error| format!("cannot open the error window: {error}"))?;
+            attach_window_events(&window);
+            Ok(())
+        }
+    };
+    // The boot spinner must not keep spinning behind the failure page.
+    if shown.is_ok() {
+        if let Some(splash) = app.get_webview_window("splash") {
+            let _ = splash.destroy();
+        }
     }
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(format!("error.html#{encoded}").into()))
-        .title("DSH")
-        .inner_size(760.0, 560.0)
-        .build()
-        .map_err(|error| format!("cannot open the error window: {error}"))?;
-    attach_window_events(&window);
-    Ok(())
+    shown
 }
 
 fn attach_window_events(window: &WebviewWindow<Wry>) {
