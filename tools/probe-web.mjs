@@ -42,8 +42,26 @@ if (!existsSync(entry)) {
 const child = spawn(
   process.env.DSH_TAURI_NODE ?? 'node',
   [entry, '--profile', profile, '--host', '127.0.0.1', '--port', '0', '--no-open'],
-  { env: { ...process.env, DSH_HOME: process.env.DSH_HOME ?? join(process.env.HOME ?? '/', '.dsh') }, stdio: ['ignore', 'pipe', 'inherit'] }
+  { env: { ...process.env, DSH_HOME: process.env.DSH_HOME ?? join(process.env.HOME ?? '/', '.dsh') }, stdio: ['ignore', 'pipe', 'pipe'] }
 );
+
+// Keep the last lines of the runtime's stderr so a failure message can explain
+// *why* it died instead of merely reporting the exit code. Bounded to 8 lines
+// and 4096 bytes; everything is still forwarded live to process.stderr.
+const STDERR_TAIL_LINES = 8;
+const STDERR_TAIL_BYTES = 4096;
+let stderrTail = '';
+child.stderr.setEncoding('utf8');
+child.stderr.on('data', (chunk) => {
+  process.stderr.write(chunk);
+  stderrTail = (stderrTail + chunk).split('\n').slice(-STDERR_TAIL_LINES).join('\n');
+  if (Buffer.byteLength(stderrTail, 'utf8') > STDERR_TAIL_BYTES) {
+    stderrTail = stderrTail.slice(-STDERR_TAIL_BYTES);
+    const firstNewline = stderrTail.indexOf('\n');
+    if (firstNewline !== -1) stderrTail = stderrTail.slice(firstNewline + 1);
+  }
+});
+const stderrSuffix = () => stderrTail.trim() ? `; stderr tail: ${stderrTail.trim()}` : '';
 
 let finished = false;
 let startupTimer = null;
@@ -72,7 +90,7 @@ process.on('SIGINT', () => terminate('SIGINT'));
 process.on('SIGTERM', () => terminate('SIGTERM'));
 
 startupTimer = setTimeout(() => {
-  fail(`runtime did not print its URL within ${STARTUP_TIMEOUT}ms (startup timeout)`);
+  fail(`runtime did not print its URL within ${STARTUP_TIMEOUT}ms (startup timeout)${stderrSuffix()}`);
 }, STARTUP_TIMEOUT);
 
 let buffer = '';
@@ -108,5 +126,5 @@ child.stdout.on('data', async (chunk) => {
 });
 
 child.on('exit', (code) => {
-  if (!child.__checked) fail(`runtime exited before printing its URL (code ${code})`);
+  if (!child.__checked) fail(`runtime exited before printing its URL (code ${code})${stderrSuffix()}`);
 });

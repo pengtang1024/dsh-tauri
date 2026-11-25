@@ -58,3 +58,16 @@ test('probe times out when the runtime never prints its URL', async (t) => {
   assert.match(result.stderr, /FAIL/);
   assert.match(result.stderr, /timeout/i);
 });
+
+test('probe echoes runtime stderr tail when the runtime exits before printing its URL', async (t) => {
+  const runtime = mkdtempSync(join(tmpdir(), 'dsh-probe-'));
+  t.after(() => rmSync(runtime, { recursive: true, force: true }));
+  const entry = join(runtime, 'node_modules', '@deepseek-ai', 'dsh', 'lib');
+  mkdirSync(entry, { recursive: true });
+  // A fake runtime that emits a unique marker on stderr, then dies before its URL.
+  writeFileSync(join(entry, 'bin.js'), "process.stderr.write('FAKE_STDERR_MARKER_42\\n'); process.exit(1);\n");
+
+  const result = await runProbe(['--runtime', runtime], { DSH_PROBE_TIMEOUT_MS: '600' });
+  assert.equal(result.code, 1, `stderr: ${result.stderr}`);
+  assert.match(result.stderr, /FAKE_STDERR_MARKER_42/);
+});
