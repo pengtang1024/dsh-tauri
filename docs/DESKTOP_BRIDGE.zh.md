@@ -99,14 +99,14 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 ## 3. 发现的缺口与建议（只建议，本任务不改源码）
 
 1. **已评估并决定不实现 · 目录选择以外的桌面功能空桥（见第 5 节）。**目前只有 `__DSH_DIRECTORY_PICKER__.pick` 真正被上游 client 消费（第 2.2 节证据）。`dshDesktop.{updates,fileDrag,browser,fileActions,shortcuts,deviceInfo}`、`dshPlatform` 均未提供；用户会在外壳里看到「Web 版」行为（无原生更新频道、无原生拖入、无原生快捷键、analytics 策略流关闭等）。**决策**：这不是待补的 P0 缺口，而是明确的「不实现」——`dshDesktop` 对象一旦存在会翻转多处行为分支（最严重是 settings-account 走 desktop 登录，而项目没有任何原生 URL-open 接线），部分子桥接的部分实现还会在插件激活期抛错或吞掉全部键盘事件。完整规格、理由与硬约束见新增第 5 节；**不要**试图补 `globalThis.dshDesktop`。
-2. **P1 · `__DSH_TAURI__` 与 `dshDesktop` 命名错位。**SHIM 的 `protocolVersion:1`、`info()`、`openExternal`、`notify`、`clipboard` 都是自己定义的一套，上游不读。这些调用本身无害（纯增强层），但会造成「已实现桌面能力」的错觉。**建议**：要么在文档/README 明确标注这部分是本项目自定义增强、不保证被上游识别；要么在后续任务把它们映射到 `dshDesktop` 相应字段（例如 `deviceInfo` 可复用 `info()` 的数据，`fileActions` 可只实现剪贴板写入）。
+2. **P1 · `__DSH_TAURI__` 与 `dshDesktop` 命名错位。**SHIM 的 `protocolVersion:1`、`info()`、`openExternal`、`notify`、`clipboard` 都是自己定义的一套，上游不读。这些调用本身无害（纯增强层），但会造成「已实现桌面能力」的错觉。**建议**：在文档/README 明确标注这部分是本项目自定义增强、不保证被上游识别。原建议「在后续任务把它们映射到 `dshDesktop` 相应字段（例如 `deviceInfo` 可复用 `info()` 的数据，`fileActions` 可只实现剪贴板写入）」**已作废，见第 5 节：不提供 `dshDesktop`、不做字段映射**，不再作为待办。
 3. **P1 · 原生快捷键是潜在硬报错。**`dsh-client-shortcuts/lib/client.js:2` 在 `document.documentElement.dataset.platform` 存在时要求 `window.dshDesktop.keyboard` 并抛 `Desktop keyboard bridge unavailable`。当前 SHIM 不设置 `data-platform`，正常应走 web 分支；但如果上游宿主或 HTML 模板给 root 加了 `data-platform`，这块会崩。**建议**：验证实际 serving 的页面 root 是否带 `data-platform`；若带，需要补 keyboard bridge 或去掉该属性（不在本任务实施）。
 4. **P2 · 剪贴板/外链走浏览器原生路径，SHIM 能力闲置。**主 bundle 多次使用 `navigator.clipboard.writeText`（`index-*.js:129,135`）与 React context `openExternalLink`；SHIM 的 `clipboard_write`/`open_external` 没有上游调用点。**建议**：若 Wry WebView 下 `navigator.clipboard` 权限受限，再考虑通过 `dshDesktop.fileActions` 等上游认识的通道补位；否则保持现状即可，不要重复注入。
-5. **验证盲区**：`test/shim-contract.test.mjs` 只验证 SHIM 自身的行为（invoke 名称、参数、标题同步），不验证「上游是否真的调用这些 API」。**建议**：后续加一条文档型/静态检查，把本文第 2 节的 grep 断言固化为 CI（例如断言 `__DSH_DIRECTORY_PICKER__` 在 `dsh-client-ui-directory-picker-native` 里有引用），避免上游版本升级后契约漂移无人发现。
+5. **验证盲区（原待办已落地）**：`test/shim-contract.test.mjs` 只验证 SHIM 自身的行为（invoke 名称、参数、标题同步），不验证「上游是否真的调用这些 API」。**已落地，不再是待办**：原「后续加一条文档型/静态检查，把本文第 2 节的 grep 断言固化为 CI」的建议已完成——`tools/check-bridge-contract.mjs` + `npm run test:contract`（例如断言 `__DSH_DIRECTORY_PICKER__` 在 `dsh-client-ui-directory-picker-native` 里有引用），且已在 CI 中运行，避免上游版本升级后契约漂移无人发现。
 
 ## 4. 如何验证：`test/shim-contract.test.mjs` 与新文档的对应关系
 
-本仓库当前（任务执行时）有 `test/shell-api.test.mjs` 与另一轨道新增的 `test/shim-contract.test.mjs`。后者直接对应本文第 1 节的契约表，从源码读取 SHIM 原文并在 `node:vm` 沙箱里执行，逐条断言：
+本仓库当前只有 `test/shim-contract.test.mjs`（由另一轨道落盘）。该文件直接对应本文第 1 节的契约表，从源码读取 SHIM 原文并在 `node:vm` 沙箱里执行，逐条断言：
 
 | 文档条目 | 测试断言（`test/shim-contract.test.mjs`） |
 | --- | --- |
@@ -127,7 +127,7 @@ grep -rn 'dshDesktop' runtime/node_modules/@deepseek-ai/dsh-client-ui-{file-drag
 grep -o 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Ciz7DZxv.js | sort -u
 ```
 
-> 说明：本次调研任务只写本文档，未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。测试是否已全绿请以 verifier 实际执行结果为准。
+> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 10 checks 0 FAIL、`cargo test` 17 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
 
 ## 5. dshDesktop v1 决策：明确不实现
 

@@ -21,7 +21,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Tauri shell for DeepSeek Harness Desktop",
-    "longDescription": "Runs the Node host shipped with an existing DeepSeek Harness Desktop installation inside a Tauri window: desktop mode, live WebSocket streams and the native bridge are preserved without the Electron runtime.",
+    "longDescription": "A Tauri 2 desktop shell for DeepSeek Harness: it runs the official @deepseek-ai/dsh npm package (dsh web, a plain Node service) as its runtime, automatically installs it on first launch and updates it in the background, and provides the window, tray, menu and native capabilities through Rust and the system WebView — no Electron runtime or pre-existing DSH Desktop installation required.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
