@@ -149,3 +149,108 @@ pub fn version_at(dir: &Path) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     value.get("version")?.as_str().map(str::to_owned)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+    /// A unique directory under the system temp root, removed on drop.
+    /// Nothing here ever touches the real runtime locations.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "dsh-tauri-runtime-test-{}-{}-{}",
+                label,
+                std::process::id(),
+                id
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            TempDir(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+
+        fn package_dir(&self) -> PathBuf {
+            self.0.join("node_modules").join(PACKAGE)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dir");
+        }
+        std::fs::write(path, contents).expect("write file");
+    }
+
+    #[test]
+    fn entry_joins_expected_path() {
+        let base = Path::new("runtime-root");
+        let expected = base
+            .join("node_modules")
+            .join(PACKAGE)
+            .join("lib")
+            .join("bin.js");
+        assert_eq!(entry(base), expected);
+    }
+
+    #[test]
+    fn has_package_true_when_entry_file_exists() {
+        let dir = TempDir::new("has-package-true");
+        write_file(&entry(dir.path()), "// stub");
+        assert!(has_package(dir.path()));
+    }
+
+    #[test]
+    fn has_package_false_when_entry_missing() {
+        let dir = TempDir::new("has-package-false");
+        assert!(!has_package(dir.path()));
+    }
+
+    #[test]
+    fn version_at_reads_version_from_valid_package_json() {
+        let dir = TempDir::new("version-valid");
+        write_file(
+            &dir.package_dir().join("package.json"),
+            r#"{"name":"@deepseek-ai/dsh","version":"1.2.3"}"#,
+        );
+        assert_eq!(version_at(dir.path()).as_deref(), Some("1.2.3"));
+    }
+
+    #[test]
+    fn version_at_none_when_package_json_missing() {
+        let dir = TempDir::new("version-missing");
+        assert_eq!(version_at(dir.path()), None);
+    }
+
+    #[test]
+    fn version_at_none_when_package_json_is_bad_json() {
+        let dir = TempDir::new("version-bad-json");
+        write_file(&dir.package_dir().join("package.json"), "{ not valid json ");
+        assert_eq!(version_at(dir.path()), None);
+    }
+
+    #[test]
+    fn version_at_none_when_version_field_absent() {
+        let dir = TempDir::new("version-no-field");
+        write_file(
+            &dir.package_dir().join("package.json"),
+            r#"{"name":"@deepseek-ai/dsh"}"#,
+        );
+        assert_eq!(version_at(dir.path()), None);
+    }
+}

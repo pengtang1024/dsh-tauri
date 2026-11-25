@@ -124,3 +124,193 @@ fn clean_stale(target: &Path) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{clean_stale, remove, sibling, Staging};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    /// Temp roots are unique per case, but a process-wide lock keeps the suite
+    /// deterministic in case any shared state is added later.
+    static SERIAL: Mutex<()> = Mutex::new(());
+    static NEXT_CASE: AtomicUsize = AtomicUsize::new(0);
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// A throwaway directory under std::env::temp_dir(); the real
+    /// ~/.dsh/dsh-tauri/runtime is never touched. Removed on drop.
+    struct TempCase {
+        root: PathBuf,
+    }
+
+    impl TempCase {
+        fn new(label: &str) -> Self {
+            let seq = NEXT_CASE.fetch_add(1, Ordering::Relaxed);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "dsh-swap-test-{}-{}-{}-{}",
+                std::process::id(), label, seq, nanos
+            ));
+            let _ = remove(&root); // guard against a crashed earlier run reusing the name
+            fs::create_dir_all(&root).expect("create temp case root");
+            Self { root }
+        }
+
+        fn target(&self) -> PathBuf {
+            self.root.join("target")
+        }
+    }
+
+    impl Drop for TempCase {
+        fn drop(&mut self) {
+            let _ = remove(&self.root);
+        }
+    }
+
+    #[test]
+    fn new_creates_staging_sibling_and_path_points_to_it() {
+        let _guard = serial();
+        let case = TempCase::new("new");
+        let target = case.target();
+
+        let staging = Staging::new(&target).expect("Staging::new must succeed");
+        let expected = sibling(&target, "new");
+
+        assert_eq!(staging.path(), expected.as_path(), "path() must be <target>.new-<pid>");
+        assert!(staging.path().is_dir(), "staging directory must exist");
+    }
+
+    #[test]
+    fn drop_without_commit_removes_staging_tree() {
+        let _guard = serial();
+        let case = TempCase::new("drop");
+        let target = case.target();
+
+        let stage = {
+            let staging = Staging::new(&target).expect("Staging::new must succeed");
+            let stage = staging.path().to_path_buf();
+            fs::write(stage.join("partial.bin"), "half-installed").expect("write into staging");
+            assert!(stage.is_dir());
+            stage // staging dropped here without commit -> interrupted install
+        };
+
+        assert!(!stage.exists(), "aborted staging tree must be removed by Drop");
+    }
+
+    #[test]
+    fn commit_swaps_in_new_tree_and_keeps_old_tree() {
+        let _guard = serial();
+        let case = TempCase::new("commit");
+        let target = case.target();
+
+        fs::create_dir_all(&target).expect("create old target");
+        fs::write(target.join("old.txt"), "old payload").expect("write old payload");
+
+        let staging = Staging::new(&target).expect("Staging::new must succeed");
+        fs::write(staging.path().join("new.txt"), "new payload").expect("write new payload");
+        staging.commit().expect("commit must succeed");
+
+        let old = sibling(&target, "old");
+        assert!(target.join("new.txt").is_file(), "new tree must be at target");
+        assert!(!target.join("old.txt").exists(), "stale content must not remain at target");
+        assert!(old.join("old.txt").is_file(), "old tree must survive at <target>.old-<pid>");
+        assert_eq!(fs::read_to_string(old.join("old.txt")).unwrap(), "old payload");
+        assert!(!sibling(&target, "new").exists(), "staging sibling must be gone after commit");
+    }
+
+    #[test]
+    fn new_clears_stale_new_and_old_siblings_first() {
+        let _guard = serial();
+        let case = TempCase::new("leftover");
+        let target = case.target();
+        let root = &case.root;
+
+        let stale_new = root.join(format!("target.new-{}", 41111));
+        let stale_old = root.join(format!("target.old-{}", 42222));
+        fs::create_dir_all(&stale_new).unwrap();
+        fs::create_dir_all(&stale_old).unwrap();
+        fs::write(stale_new.join("junk"), "x").unwrap();
+        fs::write(stale_old.join("junk"), "x").unwrap();
+
+        let staging = Staging::new(&target).expect("Staging::new must succeed");
+
+        assert!(!stale_new.exists(), "leftover .new-* must be cleared");
+        assert!(!stale_old.exists(), "leftover .old-* must be cleared");
+        assert!(staging.path().is_dir(), "fresh staging dir must exist");
+    }
+
+    #[test]
+    fn clean_stale_only_removes_matching_siblings() {
+        let _guard = serial();
+        let case = TempCase::new("clean");
+        let target = case.target();
+        let root = &case.root;
+
+        let new_dir = root.join(format!("target.new-{}", 51111));
+        let old_dir = root.join(format!("target.old-{}", 52222));
+        let plain_sibling = root.join("target-backup");
+        let unrelated_file = root.join("targets.txt");
+        let other_prefix = root.join(format!("other.new-{}", 53333));
+
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&plain_sibling).unwrap();
+        fs::write(&unrelated_file, "keep me").unwrap();
+        fs::create_dir_all(&other_prefix).unwrap();
+
+        clean_stale(&target);
+
+        assert!(!new_dir.exists(), "target.new-* must be removed");
+        assert!(!old_dir.exists(), "target.old-* must be removed");
+        assert!(plain_sibling.is_dir(), "unrelated sibling directory must survive");
+        assert!(unrelated_file.is_file(), "unrelated similar-prefix file must survive");
+        assert!(other_prefix.is_dir(), "different-base .new-* must survive");
+    }
+
+    #[cfg(unix)]
+    fn symlink_at(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("create symlink");
+    }
+
+    #[cfg(windows)]
+    fn symlink_at(target: &Path, link: &Path) {
+        std::os::windows::fs::symlink_dir(target, link).expect("create symlink");
+    }
+
+    #[test]
+    fn remove_handles_file_directory_symlink_and_missing_path() {
+        let _guard = serial();
+        let case = TempCase::new("remove");
+        let root = &case.root;
+
+        let file = root.join("plain-file");
+        fs::write(&file, "x").unwrap();
+        remove(&file).expect("remove file");
+        assert!(!file.exists(), "file must be removed");
+
+        let dir = root.join("tree");
+        fs::create_dir_all(dir.join("nested")).unwrap();
+        fs::write(dir.join("nested/leaf"), "x").unwrap();
+        remove(&dir).expect("remove directory");
+        assert!(!dir.exists(), "directory tree must be removed");
+
+        let link_target = root.join("link-target");
+        fs::create_dir_all(&link_target).unwrap();
+        fs::write(link_target.join("keep"), "x").unwrap();
+        let link = root.join("a-symlink");
+        symlink_at(&link_target, &link);
+        remove(&link).expect("remove symlink");
+        assert!(fs::symlink_metadata(&link).is_err(), "symlink itself must be gone");
+        assert!(link_target.join("keep").is_file(), "symlink target must be untouched");
+
+        remove(&root.join("never-existed")).expect("missing path is not an error");
+    }
+}
