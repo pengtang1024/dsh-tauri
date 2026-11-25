@@ -54,9 +54,21 @@ fn lock() -> MutexGuard<'static, State> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Terminal stages never accept another transition.
+///
+/// `Stage::Error` is set by `fail()` and the supervisor then opens the error
+/// page; a late `set()` from the background update thread must not overwrite
+/// it with a "running" stage.
+fn can_transition(current: Stage, _next: Stage) -> bool {
+    current != Stage::Error
+}
+
 /// Enter a new stage with the text the splash should show.
 pub fn set(stage: Stage, message: impl Into<String>) {
     let mut state = lock();
+    if !can_transition(state.stage, stage) {
+        return;
+    }
     state.stage = stage;
     state.message = message.into();
 }
@@ -89,7 +101,7 @@ pub fn runtime_status() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{runtime_status, set, Stage};
+    use super::{can_transition, runtime_status, set, Stage};
 
     #[test]
     fn reports_the_current_stage_and_message() {
@@ -98,5 +110,15 @@ mod tests {
         assert_eq!(status["stage"], "installing");
         assert_eq!(status["message"], "正在安装");
         assert!(status["elapsedSecs"].is_u64());
+    }
+
+    #[test]
+    fn error_is_terminal_for_set() {
+        assert!(!can_transition(Stage::Error, Stage::Updating));
+    }
+
+    #[test]
+    fn running_stages_accept_transitions() {
+        assert!(can_transition(Stage::Starting, Stage::Updating));
     }
 }
