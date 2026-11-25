@@ -185,6 +185,14 @@ pub fn notify(title: String, body: String) -> Result<(), String> {
     run("notify-send", &args).map(|_| ())
 }
 
+/// Label of the window whose title a `set_title` call should change.
+///
+/// Before the real UI is built only the boot splash exists, so the title sync
+/// from the SHIM must target the splash instead of the missing main window.
+fn title_window_label(main_exists: bool) -> &'static str {
+    if main_exists { "main" } else { "splash" }
+}
+
 #[tauri::command]
 pub fn set_title(app: AppHandle, title: String) -> Result<(), String> {
     if title.is_empty() {
@@ -192,7 +200,8 @@ pub fn set_title(app: AppHandle, title: String) -> Result<(), String> {
     }
     let handle = app.clone();
     app.run_on_main_thread(move || {
-        if let Some(window) = handle.get_webview_window("main") {
+        let label = title_window_label(handle.get_webview_window("main").is_some());
+        if let Some(window) = handle.get_webview_window(label) {
             let _ = window.set_title(&title);
         }
     })
@@ -250,7 +259,10 @@ pub const SHIM: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use super::{external_url_allowed, notify_args, picked_path, status_message, HelperOutcome};
+    use super::{
+        external_url_allowed, notify_args, picked_path, status_message, title_window_label,
+        HelperOutcome,
+    };
 
     #[test]
     fn allows_https() {
@@ -483,5 +495,15 @@ mod tests {
     fn status_message_reports_signal_termination() {
         let message = status_message(None).expect("signal termination must fail");
         assert!(message.contains("信号"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn title_targets_main_once_it_exists() {
+        assert_eq!(title_window_label(true), "main");
+    }
+
+    #[test]
+    fn title_targets_splash_during_startup() {
+        assert_eq!(title_window_label(false), "splash");
     }
 }
