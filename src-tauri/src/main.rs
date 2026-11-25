@@ -18,6 +18,11 @@ mod swap;
 mod update;
 mod version;
 
+/// Build the readable message shown on the error page when a window cannot open.
+fn window_error_message(stage: &str, error: &str) -> String {
+    format!("{stage}：{error}")
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -48,14 +53,22 @@ fn main() {
             if let Ok(url) = std::env::var("DSH_TAURI_URL") {
                 match url.parse::<tauri::Url>() {
                     Ok(parsed) => {
-                        let _ = shell_ui::build_main_window(&handle, parsed);
+                        if let Err(error) = shell_ui::build_main_window(&handle, parsed) {
+                            let message = window_error_message("无法打开开发 URL 指定的窗口", &error);
+                            if let Err(error) = shell_ui::show_error(&handle, &message) {
+                                eprintln!("[dsh-tauri] cannot show the error window: {error}");
+                            }
+                        }
                         return Ok(());
                     }
                     Err(error) => eprintln!("[dsh-tauri] ignoring DSH_TAURI_URL: {error}")
                 }
             }
             if let Err(error) = shell_ui::build_boot_window(&handle) {
-                eprintln!("[dsh-tauri] {error}");
+                let message = window_error_message("无法创建启动窗口", &error);
+                if let Err(error) = shell_ui::show_error(&handle, &message) {
+                    eprintln!("[dsh-tauri] cannot show the error window: {error}");
+                }
                 return Ok(());
             }
             supervisor::launch(handle);
@@ -70,4 +83,23 @@ fn main() {
             supervisor::shutdown();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::window_error_message;
+
+    #[test]
+    fn boot_window_error_contains_stage_and_error() {
+        let message = window_error_message("无法创建启动窗口", "permission denied");
+        assert!(message.contains("无法创建启动窗口"));
+        assert!(message.contains("permission denied"));
+    }
+
+    #[test]
+    fn dev_url_window_error_contains_stage_and_error() {
+        let message = window_error_message("无法打开开发 URL 指定的窗口", "no display");
+        assert!(message.contains("无法打开开发 URL 指定的窗口"));
+        assert!(message.contains("no display"));
+    }
 }
