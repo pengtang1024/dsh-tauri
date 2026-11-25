@@ -95,6 +95,23 @@ fn clear_running(pid: i32) {
     }
 }
 
+/// RAII guard: a helper's process group stays registered for exactly as long as
+/// this value lives, including when a scope is left early via `?` or `return`.
+struct Registration(i32);
+
+impl Registration {
+    fn new(pid: i32) -> Self {
+        register_running(pid);
+        Self(pid)
+    }
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        clear_running(self.0);
+    }
+}
+
 /// Run `program args…`; `Err` only when the process cannot be spawned at all.
 ///
 /// `stdout`/`stderr` are drained on their own threads so a chatty helper can
@@ -128,7 +145,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
     }
     .map_err(|error| format!("无法运行 {}：{error}", program.display()))?;
     let pid = child.id() as i32;
-    register_running(pid);
+    let _registration = Registration::new(pid);
 
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
@@ -140,7 +157,6 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                clear_running(pid);
                 return Err(format!("等待 {} 时出错：{error}", program.display()));
             }
         }
@@ -159,7 +175,6 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    clear_running(pid);
 
     Ok(Outcome {
         status,
@@ -171,13 +186,18 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
 #[cfg(test)]
 mod tests {
-    use super::{kill_running, run, RUNNING};
+    use super::{kill_running, run, Registration, RUNNING};
     use std::path::Path;
     use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
 
     /// `RUNNING` is process-wide, so these tests must not overlap.
     static SERIAL: Mutex<()> = Mutex::new(());
+
+    /// Test helper: is this pid currently in the global RUNNING set?
+    fn is_registered(pid: i32) -> bool {
+        RUNNING.lock().map(|guard| guard.contains(&pid)).unwrap_or(false)
+    }
 
     #[test]
     fn kill_running_stops_the_whole_process_group() {
@@ -239,5 +259,34 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10), "kill must not wait for the sleep");
         worker1.join().expect("worker 1 thread");
         worker2.join().expect("worker 2 thread");
+    }
+
+    /// RAII guarantee: leaving a scope early (like the timeout branch's
+    /// `child.wait()?` path) must still unregister the pid via Drop.
+    #[test]
+    fn registration_unregisters_on_early_return() {
+        let _serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let pid = i32::MAX - 1234;
+        fn early_return(pid: i32) {
+            let _registration = Registration::new(pid);
+            assert!(is_registered(pid), "pid must be registered inside the scope");
+            return; // simulate an early `?` return
+        }
+        assert!(!is_registered(pid), "pid must be clean before the test");
+        early_return(pid);
+        assert!(!is_registered(pid), "early return must still unregister the pid via Drop");
+    }
+
+    /// Direct check: the guard registers on construction and clears on drop.
+    #[test]
+    fn registration_clears_on_drop() {
+        let _serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let pid = i32::MAX - 1235;
+        assert!(!is_registered(pid), "pid must be clean before the test");
+        {
+            let _registration = Registration::new(pid);
+            assert!(is_registered(pid), "pid must be registered while the guard lives");
+        }
+        assert!(!is_registered(pid), "pid must be cleared after the guard drops");
     }
 }
