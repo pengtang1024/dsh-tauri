@@ -28,7 +28,7 @@
 - **测试整理**：删除失效的 shell-api 测试，新增 SHIM 契约单测（21 项断言）与 probe-cli 失败路径测试
 - **契约漂移守卫**：新增上游桥接契约静态检查（11 项（含 SHIM 双窗口注入点））并接入 CI
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 103 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、exec 并发与 RAII、single_instance、DSH host 校验、update 版本解析与 shell_ui 原子写、supervisor 优雅退出、install npm 安装参数
+- **Rust 单测扩容**：从 17 个增至 107 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance、DSH host 校验、update 版本解析与 shell_ui 原子写、supervisor 优雅退出、install npm 安装参数
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 23 项
 
 **工程**
