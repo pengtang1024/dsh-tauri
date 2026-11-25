@@ -1,5 +1,7 @@
 # dsh-tauri
 
+[简体中文](docs/DETAIL.zh.md) · [English](docs/DETAIL.en.md) · [Español](docs/DETAIL.es.md) · [Français](docs/DETAIL.fr.md) · [Deutsch](docs/DETAIL.de.md) · [Русский](docs/DETAIL.ru.md) · [Português](docs/DETAIL.pt.md)
+
 用 **Tauri 2** 给 [DeepSeek Harness](https://github.com/deepseek-ai) 做的桌面客户端：
 窗口、托盘、菜单和原生能力来自 Rust + 系统 WebView，Harness 本身运行官方 npm 包
 `@deepseek-ai/dsh`，也就是 `dsh web` 那套纯 Node 服务。
@@ -172,3 +174,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 
 本项目与 DeepSeek 官方无关，不包含官方二进制；运行时由用户按上面的命令安装。
 代码以 MIT 发布，见 [LICENSE](LICENSE)。
+
+## 支持本项目
+
+如果这个项目对你有帮助，欢迎给 [pengtang1024/dsh-tauri](https://github.com/pengtang1024/dsh-tauri) 点个 star ⭐，你的支持是我继续维护的动力。

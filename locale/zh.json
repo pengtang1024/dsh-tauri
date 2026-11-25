@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "dsh-tauri 详细说明",
+    "description": "用 Tauri 2 给 DeepSeek Harness 做的桌面客户端：窗口、托盘、菜单和原生能力来自 Rust + 系统 WebView，Harness 本身运行官方 npm 包 @deepseek-ai/dsh，也就是 dsh web 那套纯 Node 服务。不需要 Electron，也不需要安装 DSH Desktop。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

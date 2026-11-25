@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "dsh-tauri — Detailed Guide",
+    "description": "A desktop client for DeepSeek Harness built with Tauri 2: the window, tray, menu, and native capabilities come from Rust + the system WebView, while Harness itself runs the official npm package @deepseek-ai/dsh, i.e. the pure Node service behind dsh web. Neither Electron nor DSH Desktop needs to be installed.",
+    "detail": "docs/DETAIL.en.md"
+  }
+}
