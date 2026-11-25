@@ -12,7 +12,7 @@
 ## 验证命令
 
 ```bash
-npm run check   # 检查全部 helper 脚本语法
+npm run check   # 检查全部 tools 脚本语法
 npm run check:docs                           # 校验三处文档测试数与 Rust 源码一致（verify:fast 已包含）
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）

@@ -12,7 +12,7 @@
     "test:clean": "node tools/probe-clean.mjs",
     "test:unit": "node --test test/*.test.mjs",
     "test:contract": "node tools/check-bridge-contract.mjs",
-    "check": "node --check tools/probe-web.mjs && node --check tools/check-bridge-contract.mjs",
+    "check": "node --check tools/check-scripts.mjs && node tools/check-scripts.mjs",
     "check:docs": "node tools/check-doc-counts.mjs",
     "verify:fast": "npm run check && npm run check:docs && npm run test:unit && npm run test:contract",
     "verify:all": "npm run verify:fast && npm run cargo -- test",
