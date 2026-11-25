@@ -195,11 +195,11 @@ pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
 }
 
 fn show_main_window(app: &AppHandle<Wry>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    let label = menu_window_label(app.get_webview_window("main").is_some());
+    let Some(window) = app.get_webview_window(label) else { return };
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
 }
 
 /// Keep a remembered geometry usable: a monitor change must not park the window
