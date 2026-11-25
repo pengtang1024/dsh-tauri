@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -76,36 +76,6 @@ impl Config {
     }
 }
 
-/// Read-only equivalent of `runtime::has_package`: no install, no global state.
-fn has_entry(dir: &Path) -> bool {
-    crate::runtime::entry(dir).is_file()
-}
-
-/// Look for an already installed runtime, without ever installing one.
-/// Mirrors `runtime::locate`, including the `DSH_TAURI_RUNTIME` override handled
-/// by `runtime::ensure`, but only inspects the filesystem.
-fn locate_existing(app: Option<&AppHandle>) -> Option<PathBuf> {
-    if let Some(dir) = env_path("DSH_TAURI_RUNTIME") {
-        return has_entry(&dir).then_some(dir);
-    }
-    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("runtime");
-    let candidates = [checkout, crate::runtime::install_dir()];
-    for dir in candidates {
-        if has_entry(&dir) {
-            return Some(dir);
-        }
-    }
-    if let Some(dir) = app
-        .and_then(|handle| handle.path().resource_dir().ok())
-        .map(|dir| dir.join("runtime"))
-    {
-        if has_entry(&dir) {
-            return Some(dir);
-        }
-    }
-    None
-}
-
 /// Pure assembly of the shim's info payload: any `None` becomes JSON `null`.
 pub(crate) fn info_into(entry: Option<&Path>, home: Option<&Path>, profile: &str) -> serde_json::Value {
     json!({
@@ -123,7 +93,7 @@ pub(crate) fn info_into(entry: Option<&Path>, home: Option<&Path>, profile: &str
 pub fn info(app: &AppHandle) -> serde_json::Value {
     let home = env_path("DSH_HOME").unwrap_or_else(|| home_dir().join(".dsh"));
     let profile = std::env::var("DSH_TAURI_PROFILE").unwrap_or_else(|_| "web".to_owned());
-    let entry = locate_existing(Some(app)).map(|dir| crate::runtime::entry(&dir));
+    let entry = crate::runtime::locate_existing(Some(app)).map(|dir| crate::runtime::entry(&dir));
     info_into(entry.as_deref(), Some(&home), &profile)
 }
 
