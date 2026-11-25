@@ -125,9 +125,16 @@ pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     Menu::with_items(app, &[&edit, &view, &window])
 }
 
+/// Which window owns the shared menu: the real UI once it exists, otherwise the
+/// boot splash. Pure so the choice can be tested without building an AppHandle.
+fn menu_window_label(main_exists: bool) -> &'static str {
+    if main_exists { "main" } else { "splash" }
+}
+
 /// Wire menu actions; unknown ids are ignored so predefined items keep working.
 pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
-    let Some(window) = app.get_webview_window("main") else { return };
+    let label = menu_window_label(app.get_webview_window("main").is_some());
+    let Some(window) = app.get_webview_window(label) else { return };
     match id {
         "reload" => {
             let _ = window.eval("window.location.reload()");
@@ -341,7 +348,17 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_state, encode_state, urlencoding, WindowState};
+    use super::{decode_state, encode_state, menu_window_label, urlencoding, WindowState};
+
+    #[test]
+    fn menu_targets_main_when_it_exists() {
+        assert_eq!(menu_window_label(true), "main");
+    }
+
+    #[test]
+    fn menu_targets_splash_before_main_exists() {
+        assert_eq!(menu_window_label(false), "splash");
+    }
 
     #[test]
     fn escapes_everything_except_unreserved_bytes() {
