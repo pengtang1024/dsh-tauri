@@ -26,8 +26,10 @@
   <div class="spinner" id="spinner"></div>
   <div class="hint" id="hint">首次启动需要初始化插件，通常几秒到半分钟</div>
   <script>
-    // The splash polls the shell for its boot stage (no eval injection): during
-    // a first launch this is how the automatic npm install becomes visible.
+    // The splash polls the shell for its boot stage: during a first launch
+    // this is how the automatic npm install becomes visible. A response is
+    // never overlapped (an older stage must not overwrite a newer one), and
+    // 'error' is terminal: it stops the timer for good.
     (() => {
       const stageEl = document.getElementById('stage');
       const hintEl = document.getElementById('hint');
@@ -40,6 +42,20 @@
         updating: '启动后会在后台检查并下载更新',
         error: ''
       };
+      let inFlight = false;
+      let done = false;
+      let timer = null;
+
+      const fail = () => {
+        hintEl.textContent = '与外壳通信失败，请重启应用';
+      };
+      const stop = () => {
+        done = true;
+        if (timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
       const describe = (status) => {
         if (!status) return;
         const elapsed = Number(status.elapsedSecs || 0);
@@ -47,20 +63,30 @@
           stageEl.textContent = 'DSH 启动失败';
           hintEl.textContent = status.error || status.message || '未知错误';
           spinner.style.display = 'none';
+          stop();
           return;
         }
         stageEl.textContent = (status.message || '正在启动 DSH 服务…') + '（已用 ' + elapsed + ' 秒）';
         hintEl.textContent = hints[status.stage] || '';
       };
       const poll = () => {
+        if (done || inFlight) return;
         const core = globalThis.__TAURI__ && globalThis.__TAURI__.core;
         if (!core) return;
-        core.invoke('runtime_status').then(describe).catch(() => {
-          hintEl.textContent = '与外壳通信失败，请重启应用';
-        });
+        inFlight = true;
+        try {
+          core.invoke('runtime_status')
+            .then(describe)
+            .catch(fail)
+            .finally(() => { inFlight = false; });
+        } catch {
+          fail();
+          inFlight = false;
+        }
       };
+
+      timer = setInterval(poll, 500);
       poll();
-      setInterval(poll, 500);
     })();
   </script>
 </body>
