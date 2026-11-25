@@ -29,8 +29,20 @@
       <pre id="detail"></pre>
     </main>
     <script>
-      const detail = decodeURIComponent(location.hash.slice(1));
-      document.getElementById('detail').textContent = detail || 'unknown error';
+      function decodeErrorHash(hash) {
+        if (!hash) return 'unknown error';
+        let decoded;
+        try {
+          decoded = decodeURIComponent(hash);
+        } catch {
+          const preview = hash.slice(0, 200);
+          return '无法解析错误信息（hash 含非法转义）；原始内容：' + preview;
+        }
+        return decoded || 'unknown error';
+      }
+
+      const detail = decodeErrorHash(location.hash.slice(1));
+      document.getElementById('detail').textContent = detail;
     </script>
   </body>
 </html>
