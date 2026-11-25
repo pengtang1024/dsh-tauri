@@ -6,6 +6,26 @@ use std::process::Command;
 
 use tauri::{AppHandle, Manager};
 
+/// Schemes the renderer may ask the desktop to hand to an external program.
+const ALLOWED_URL_SCHEMES: [&str; 3] = ["https://", "http://", "mailto:"];
+
+/// Whether `url` may be passed to an external program.
+///
+/// The page is remote content, so only known schemes are accepted (matched
+/// case-insensitively). ASCII control characters are rejected even though
+/// they arrive as a single argv entry: a downstream handler could still read
+/// them as separators. There is deliberately no host allowlist — the shell
+/// must be able to open arbitrary external documentation links.
+pub(crate) fn external_url_allowed(url: &str) -> bool {
+    if url.is_empty() || url.bytes().any(|byte| byte.is_ascii_control()) {
+        return false;
+    }
+    ALLOWED_URL_SCHEMES.iter().any(|scheme| {
+        url.get(..scheme.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+    })
+}
+
 /// Run a helper and capture stdout, reporting the failure text verbatim.
 fn run(program: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new(program)
@@ -62,8 +82,29 @@ pub fn clipboard_write(text: String) -> Result<(), String> {
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
     // Never hand a non-URL to the shell: the renderer is remote content.
-    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")) {
-        return Err(format!("refusing to open {url}: only http(s) and mailto are allowed"));
+    if !external_url_allowed(&url) {
+        // Echo the scheme only: the rest of the URL may carry tokens in its
+        // query string, so it must never reach a log. Sanitize the scheme too
+        // in case the rejected URL contains a control character before ':'.
+        let scheme = url
+            .split_once(':')
+            .map(|(prefix, _)| prefix)
+            .filter(|prefix| !prefix.is_empty())
+            .unwrap_or("<none>");
+        let scheme: String = scheme
+            .chars()
+            .take(32)
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.') {
+                    c
+                } else {
+                    '?'
+                }
+            })
+            .collect();
+        return Err(format!(
+            "refusing to open {scheme}: only http(s) and mailto are allowed"
+        ));
     }
     run("xdg-open", &[&url]).map(|_| ())
 }
@@ -135,3 +176,98 @@ pub const SHIM: &str = r#"
   else start();
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::external_url_allowed;
+
+    #[test]
+    fn allows_https() {
+        assert!(external_url_allowed("https://example.com/docs"));
+    }
+
+    #[test]
+    fn allows_http() {
+        assert!(external_url_allowed("http://example.com"));
+    }
+
+    #[test]
+    fn allows_mailto() {
+        assert!(external_url_allowed("mailto:someone@example.com"));
+    }
+
+    #[test]
+    fn allows_uppercase_scheme() {
+        assert!(external_url_allowed("HTTPS://example.com/docs"));
+        assert!(external_url_allowed("HTTP://example.com"));
+        assert!(external_url_allowed("MAILTO:someone@example.com"));
+        assert!(external_url_allowed("HtTpS://example.com"));
+    }
+
+    #[test]
+    fn allows_url_with_query_parameters() {
+        assert!(external_url_allowed(
+            "https://example.com/search?q=rust&lang=zh&token=abc%2Fdef#frag"
+        ));
+        assert!(external_url_allowed("http://example.com/a?x=1&y=2"));
+        assert!(external_url_allowed("mailto:someone@example.com?subject=hi%20there"));
+    }
+
+    #[test]
+    fn rejects_file_scheme() {
+        assert!(!external_url_allowed("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn rejects_javascript_scheme() {
+        assert!(!external_url_allowed("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn rejects_data_scheme() {
+        assert!(!external_url_allowed("data:text/html,<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn rejects_ftp_scheme() {
+        assert!(!external_url_allowed("ftp://example.com/file"));
+    }
+
+    #[test]
+    fn rejects_empty_string() {
+        assert!(!external_url_allowed(""));
+    }
+
+    #[test]
+    fn rejects_newline() {
+        assert!(!external_url_allowed("https://example.com/a\nb"));
+        assert!(!external_url_allowed("https://example.com/a\r\nX-Evil: 1"));
+    }
+
+    #[test]
+    fn rejects_nul() {
+        assert!(!external_url_allowed("https://example.com/a\0b"));
+    }
+
+    #[test]
+    fn rejects_del() {
+        assert!(!external_url_allowed("https://example.com/a\u{7f}b"));
+    }
+
+    #[test]
+    fn rejects_all_ascii_controls() {
+        for code in 0u8..=0x1f {
+            let control = code as char;
+            let url = format!("https://example.com/a{control}b");
+            assert!(!external_url_allowed(&url), "control U+{code:04X} was accepted");
+        }
+        assert!(!external_url_allowed("https://example.com/a\u{7f}b"));
+    }
+
+    #[test]
+    fn rejects_scheme_prefix_without_delimiter() {
+        assert!(!external_url_allowed("https"));
+        assert!(!external_url_allowed("mailto"));
+        assert!(!external_url_allowed("httpsx://example.com"));
+    }
+}
