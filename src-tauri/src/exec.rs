@@ -12,8 +12,8 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-/// Group id of the helper currently running, so shutdown can stop it.
-static RUNNING: Mutex<Option<i32>> = Mutex::new(None);
+/// Group ids of the helpers currently running, so shutdown can stop every one.
+static RUNNING: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
 /// Result of a finished (or killed) helper process.
 pub struct Outcome {
@@ -58,19 +58,40 @@ fn signal_group(pid: i32, signal: i32) {
     }
 }
 
-/// Stop a helper that is still in flight (called while the shell shuts down).
+/// Stop every helper still in flight (called while the shell shuts down).
+///
+/// Each registered group gets SIGTERM first; after a short grace period every
+/// group gets SIGKILL. Terminating one helper must never affect another one's
+/// registration.
 pub fn kill_running() {
-    let pid = RUNNING.lock().ok().and_then(|guard| *guard);
-    let Some(pid) = pid else { return };
-    eprintln!("[runtime] 退出：终止正在运行的 npm（进程组 {pid}）");
-    signal_group(pid, libc::SIGTERM);
+    let pids: Vec<i32> = RUNNING.lock().map(|guard| guard.clone()).unwrap_or_default();
+    if pids.is_empty() {
+        return;
+    }
+    for pid in &pids {
+        eprintln!("[runtime] 退出：终止正在运行的 npm（进程组 {pid}）");
+        signal_group(*pid, libc::SIGTERM);
+    }
     std::thread::sleep(Duration::from_millis(300));
-    signal_group(pid, libc::SIGKILL);
+    for pid in &pids {
+        signal_group(*pid, libc::SIGKILL);
+    }
 }
 
-fn clear_running() {
+/// Register a helper's process group as in flight.
+fn register_running(pid: i32) {
     if let Ok(mut guard) = RUNNING.lock() {
-        *guard = None;
+        if !guard.contains(&pid) {
+            guard.push(pid);
+        }
+    }
+}
+
+/// Forget only the helper that just finished; other in-flight helpers stay
+/// registered so shutdown can still find them.
+fn clear_running(pid: i32) {
+    if let Ok(mut guard) = RUNNING.lock() {
+        guard.retain(|&registered| registered != pid);
     }
 }
 
@@ -107,9 +128,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
     }
     .map_err(|error| format!("无法运行 {}：{error}", program.display()))?;
     let pid = child.id() as i32;
-    if let Ok(mut guard) = RUNNING.lock() {
-        *guard = Some(pid);
-    }
+    register_running(pid);
 
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
@@ -121,7 +140,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                clear_running();
+                clear_running(pid);
                 return Err(format!("等待 {} 时出错：{error}", program.display()));
             }
         }
@@ -140,7 +159,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    clear_running();
+    clear_running(pid);
 
     Ok(Outcome {
         status,
@@ -152,12 +171,12 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
 #[cfg(test)]
 mod tests {
-    use super::{kill_running, run};
+    use super::{kill_running, run, RUNNING};
     use std::path::Path;
-    use std::sync::Mutex;
+    use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
 
-    /// `RUNNING` is process-wide, so these two tests must not overlap.
+    /// `RUNNING` is process-wide, so these tests must not overlap.
     static SERIAL: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -181,5 +200,44 @@ mod tests {
         assert!(outcome.timed_out, "the deadline must be reported");
         assert!(!outcome.status.success(), "helper must be killed on timeout");
         assert!(started.elapsed() < Duration::from_secs(10), "timeout must not wait for the sleep");
+    }
+
+    /// Two overlapping helpers must both be stopped by a single `kill_running()`:
+    /// the old single-slot registry lost the first pid and left it orphaned.
+    #[test]
+    fn kill_running_stops_every_concurrent_helper() {
+        let _serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (tx1, rx1) = mpsc::channel();
+        let (tx2, rx2) = mpsc::channel();
+        let worker1 = std::thread::spawn(move || {
+            let result = run(Path::new("/bin/sh"), &["-c", "sleep 30"], Duration::from_secs(60));
+            let _ = tx1.send(result);
+        });
+        let worker2 = std::thread::spawn(move || {
+            let result = run(Path::new("/bin/sh"), &["-c", "sleep 30"], Duration::from_secs(60));
+            let _ = tx2.send(result);
+        });
+
+        // Both helpers must be registered before we ask shutdown to stop them.
+        let wait_started = Instant::now();
+        loop {
+            let registered = RUNNING.lock().map(|guard| guard.len()).unwrap_or(0);
+            if registered >= 2 {
+                break;
+            }
+            assert!(wait_started.elapsed() < Duration::from_secs(10), "both helpers must register");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let started = Instant::now();
+        kill_running();
+        for rx in [&rx1, &rx2] {
+            let outcome = rx.recv_timeout(Duration::from_secs(10)).expect("helper must exit promptly").expect("helper started");
+            assert!(!outcome.status.success(), "every helper must be killed, got {:?}", outcome.status);
+            assert!(!outcome.timed_out, "the deadline must not be the reason it stopped");
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "kill must not wait for the sleep");
+        worker1.join().expect("worker 1 thread");
+        worker2.join().expect("worker 2 thread");
     }
 }
