@@ -24,10 +24,22 @@ struct Session {
 }
 
 static SESSION: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+/// Suppresses restarts in the supervisor loop after a shell-initiated stop.
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+/// One-shot gate: the tray exit handler calls `shutdown()` before `app.exit(0)`,
+/// and the resulting `RunEvent::Exit` calls it again. Only the first caller may
+/// tear down the server.
+static SHUTDOWN_DONE: AtomicBool = AtomicBool::new(false);
 
 fn session() -> &'static Mutex<Option<Session>> {
     SESSION.get_or_init(|| Mutex::new(None))
+}
+
+/// Claim the one-shot shutdown gate: `true` for the first caller, `false` for
+/// every later one. Pure over the supplied atomic so the idempotence guarantee
+/// is testable without spawning a server.
+fn claim_shutdown(done: &AtomicBool) -> bool {
+    !done.swap(true, Ordering::SeqCst)
 }
 
 /// Start the server and keep it supervised on a background thread.
@@ -175,6 +187,12 @@ fn term_result_ok(rc: i32) -> bool {
 
 /// Ask the server to stop, then forget the handle. Called from the tray/menu.
 pub fn shutdown() {
+    // `app.exit(0)` from the tray fires `RunEvent::Exit`, so the same exit can
+    // reach this function twice. Repeating the teardown could SIGTERM a pid that
+    // was already reaped and reused; the gate makes the whole operation one-shot.
+    if !claim_shutdown(&SHUTDOWN_DONE) {
+        return;
+    }
     SHUTTING_DOWN.store(true, Ordering::Relaxed);
     // An install or update may be running npm: stop it instead of leaving it
     // behind with a half-written staging directory.
@@ -207,7 +225,39 @@ pub fn shutdown() {
 
 #[cfg(test)]
 mod tests {
-    use super::term_result_ok;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use super::{claim_shutdown, term_result_ok};
+
+    #[test]
+    fn claim_shutdown_is_idempotent() {
+        let done = AtomicBool::new(false);
+        assert!(claim_shutdown(&done));
+        assert!(!claim_shutdown(&done));
+        assert!(!claim_shutdown(&done));
+    }
+
+    #[test]
+    fn claim_shutdown_has_exactly_one_winner_across_threads() {
+        let done = Arc::new(AtomicBool::new(false));
+        let winners = Arc::new(AtomicUsize::new(0));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let done = Arc::clone(&done);
+                let winners = Arc::clone(&winners);
+                std::thread::spawn(move || {
+                    if claim_shutdown(&done) {
+                        winners.fetch_add(1, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("claim thread panicked");
+        }
+        assert_eq!(winners.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn term_result_ok_on_success() {
