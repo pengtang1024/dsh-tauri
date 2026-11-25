@@ -23,6 +23,7 @@ npm run verify:all      # 全量离线门禁：verify:fast + Rust 单测
 npm run verify:e2e   # 全量离线门禁 + 真运行时探针（自动使用工作区临时 DSH_HOME 并清理）
 npm run cargo -- test                        # Rust 单测
 npm run cargo -- build                       # Rust 构建
+npm run build:check   # 链接真正的生产二进制（cfg(test) 之外的代码）
 ```
 
 `npm run cargo` 是 cargo 的薄包装脚本：默认把 `CARGO_TARGET_DIR` 指向工作区内的
@@ -44,7 +45,8 @@ CI 亦执行这三项。
 `test:contract` 会自动 SKIP；但真正的
 端到端确认仍须跑 `npm test`（需要运行时）。`npm run verify:all` 则在 `verify:fast`
 基础上再跑一遍 `cargo test`（经 `tools/cargo.mjs` 包装脚本调用，无需手动设置
-`CARGO_TARGET_DIR`）；同样地，端到端真探针仍需 `npm test`。
+`CARGO_TARGET_DIR`）；`verify:all` 已包含 `build:check` 链接检查（在测试之前，
+链接真正的生产二进制，覆盖 `cfg(test)` 之外的代码）；同样地，端到端真探针仍需 `npm test`。
 `npm run verify:e2e` 则在 `verify:all` 之后再跑一遍真运行时探针（`test:clean` 包装脚本）：
 每次在运行中自动建工作区内临时目录 `.dsh-probe-<pid>` 作为 `DSH_HOME`，结束时
 自动删除，不碰 `~/.dsh`，失败或中断也不会留下残留。

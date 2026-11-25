@@ -16,12 +16,13 @@
     "check:docs": "node tools/check-doc-counts.mjs",
     "check:versions": "node tools/check-versions.mjs",
     "verify:fast": "npm run check && npm run check:docs && npm run check:versions && npm run test:unit && npm run test:contract",
-    "verify:all": "npm run verify:fast && npm run cargo -- test",
+    "verify:all": "npm run verify:fast && npm run build:check && npm run cargo -- test",
     "verify:e2e": "npm run verify:all && npm run test:clean",
     "cargo": "node tools/cargo.mjs",
     "dev": "node tools/cargo.mjs run",
     "build": "npx tauri build",
     "build:deb": "npx tauri build --bundles deb",
+    "build:check": "npm run cargo -- build",
     "install-runtime": "npm install --prefix runtime @deepseek-ai/dsh"
   },
   "devDependencies": {
