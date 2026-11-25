@@ -92,6 +92,14 @@ pub fn claim(app: &AppHandle) -> bool {
     }
 }
 
+/// Label of the window that should answer a focus request.
+///
+/// The main window does not exist during startup (only the splash does), so
+/// falling back to the splash keeps the second launch from being swallowed.
+fn focus_label(main_exists: bool) -> &'static str {
+    if main_exists { "main" } else { "splash" }
+}
+
 fn accept_forever(listener: UnixListener, app: AppHandle) {
     for stream in listener.incoming().flatten() {
         let mut line = String::new();
@@ -103,7 +111,9 @@ fn accept_forever(listener: UnixListener, app: AppHandle) {
         }
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
-            if let Some(window) = handle.get_webview_window("main") {
+            let main_exists = handle.get_webview_window("main").is_some();
+            let label = focus_label(main_exists);
+            if let Some(window) = handle.get_webview_window(label) {
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
@@ -144,6 +154,16 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn focus_label_main_exists_returns_main() {
+        assert_eq!(focus_label(true), "main");
+    }
+
+    #[test]
+    fn focus_label_main_missing_returns_splash() {
+        assert_eq!(focus_label(false), "splash");
     }
 
     #[test]
