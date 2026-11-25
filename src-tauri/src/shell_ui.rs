@@ -170,6 +170,13 @@ pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "quit" => {
+                // app.exit() is a hard exit: no Destroyed event is guaranteed, so
+                // persist geometry here. Reuse the menu's label choice — the main
+                // window when it exists, otherwise the still-live boot splash.
+                let label = menu_window_label(app.get_webview_window("main").is_some());
+                if let Some(window) = app.get_webview_window(label) {
+                    save_window_state(&window);
+                }
                 crate::supervisor::shutdown();
                 app.exit(0);
             }
