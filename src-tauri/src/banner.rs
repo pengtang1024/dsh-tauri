@@ -2,14 +2,30 @@
 //!
 //! `dsh web` prints exactly one line carrying its token URL; everything else on
 //! stdout is ordinary log traffic that must not be mistaken for it. The tagged
-//! line (`dsh web: …token=…`) wins; if no line is tagged, any http(s) URL is
-//! accepted so a banner change upstream cannot leave the shell without a window.
+//! line (`dsh web: …token=…`) wins; if no line is tagged, the first http(s) URL
+//! is used as a fallback. Either way the parsed origin must be a loopback host,
+//! since the shell always launches `dsh` with `--host 127.0.0.1`.
 
 use tauri::Url;
 
 /// Pull the URL out of a runtime output line.
 pub fn web_url(line: &str) -> Option<String> {
-    tagged_url(line).or_else(|| loose_url(line))
+    let url = tagged_url(line).or_else(|| loose_url(line))?;
+    let parsed = url.parse::<Url>().ok()?;
+    let http_scheme = matches!(parsed.scheme(), "http" | "https");
+    let loopback_host = match parsed.host_str() {
+        Some(host) => {
+            // `host_str()` brackets IPv6 literals (`[::1]`); domains are
+            // normalized to lower case but normalize explicitly as a guard.
+            let host = host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_ascii_lowercase();
+            matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1")
+        }
+        None => false,
+    };
+    (http_scheme && loopback_host).then_some(url)
 }
 
 fn tagged_url(line: &str) -> Option<String> {
@@ -54,5 +70,64 @@ mod tests {
     #[test]
     fn falls_back_to_a_loose_url_when_nothing_is_tagged() {
         assert_eq!(web_url("serving at http://127.0.0.1:9/").as_deref(), Some("http://127.0.0.1:9/"));
+    }
+
+    #[test]
+    fn rejects_an_external_url_from_a_tagged_line() {
+        assert_eq!(
+            web_url("dsh web: https://evil.example/x?token=abc"),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_an_external_url_from_an_untagged_line() {
+        assert_eq!(
+            web_url("loaded plugin from https://evil.example/x"),
+            None
+        );
+    }
+
+    #[test]
+    fn accepts_localhost_as_a_loopback_host() {
+        assert_eq!(
+            web_url("dsh web: http://localhost:44123/?token=abc").as_deref(),
+            Some("http://localhost:44123/?token=abc")
+        );
+    }
+
+    #[test]
+    fn accepts_bracketed_ipv6_loopback() {
+        assert_eq!(
+            web_url("dsh web: http://[::1]:44123/?token=abc").as_deref(),
+            Some("http://[::1]:44123/?token=abc")
+        );
+    }
+
+    #[test]
+    fn accepts_https_on_a_loopback_host() {
+        assert_eq!(
+            web_url("dsh web: https://127.0.0.1:44123/?token=abc").as_deref(),
+            Some("https://127.0.0.1:44123/?token=abc")
+        );
+    }
+
+    #[test]
+    fn rejects_other_non_loopback_hosts() {
+        assert_eq!(web_url("serving at http://0.0.0.0:9/"), None);
+        assert_eq!(web_url("serving at http://example.com:9/"), None);
+    }
+
+    #[test]
+    fn accepts_an_uppercase_localhost_host() {
+        assert_eq!(
+            web_url("serving at http://LOCALHOST:9/").as_deref(),
+            Some("http://LOCALHOST:9/")
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_schemes_even_on_loopback() {
+        assert_eq!(web_url("serving at ftp://127.0.0.1:9/"), None);
     }
 }
