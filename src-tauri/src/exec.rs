@@ -66,11 +66,19 @@ fn should_force_kill(reaped_during_grace: bool) -> bool {
     !reaped_during_grace
 }
 
+/// Decide which snapshotted process groups still need SIGKILL after the grace
+/// period. A helper that exited during the grace window has already been
+/// unregistered by its RAII guard, so its pid may have been reused by an
+/// unrelated group and must not be signalled.
+fn still_needs_kill(snapshot: &[i32], live: &[i32]) -> Vec<i32> {
+    snapshot.iter().copied().filter(|pid| live.contains(pid)).collect()
+}
+
 /// Stop every helper still in flight (called while the shell shuts down).
 ///
 /// Each registered group gets SIGTERM first; after a short grace period every
-/// group gets SIGKILL. Terminating one helper must never affect another one's
-/// registration.
+/// group still registered after the grace period gets SIGKILL. Terminating one
+/// helper must never affect another one's registration.
 pub fn kill_running() {
     let pids: Vec<i32> = RUNNING.lock().map(|guard| guard.clone()).unwrap_or_default();
     if pids.is_empty() {
@@ -81,8 +89,11 @@ pub fn kill_running() {
         signal_group(*pid, libc::SIGTERM);
     }
     std::thread::sleep(Duration::from_millis(300));
-    for pid in &pids {
-        signal_group(*pid, libc::SIGKILL);
+    // Re-read after the grace period: helpers that exited on SIGTERM have
+    // already unregistered themselves, and their pids may have been reused.
+    let live: Vec<i32> = RUNNING.lock().map(|guard| guard.clone()).unwrap_or_default();
+    for pid in still_needs_kill(&pids, &live) {
+        signal_group(pid, libc::SIGKILL);
     }
 }
 
@@ -198,7 +209,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
 #[cfg(test)]
 mod tests {
-    use super::{kill_running, run, should_force_kill, Registration, RUNNING};
+    use super::{kill_running, run, should_force_kill, still_needs_kill, Registration, RUNNING};
     use std::path::Path;
     use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
@@ -221,6 +232,19 @@ mod tests {
     #[test]
     fn no_force_kill_when_reaped() {
         assert!(!should_force_kill(true), "a reaped child must not receive SIGKILL");
+    }
+
+    /// Only the snapshotted groups still registered after the grace period
+    /// need SIGKILL; the ones that exited during it must be left alone.
+    #[test]
+    fn still_needs_kill_keeps_only_registered_pids() {
+        assert_eq!(still_needs_kill(&[1, 2, 3], &[2, 3]), vec![2, 3]);
+    }
+
+    /// When every helper exited during the grace period, no pid is safe to kill.
+    #[test]
+    fn still_needs_kill_empty_when_everyone_exited() {
+        assert_eq!(still_needs_kill(&[1, 2], &[]), Vec::<i32>::new());
     }
 
     #[test]
