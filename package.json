@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "test": "node tools/probe-web.mjs",
+    "test:unit": "node --test test/*.test.mjs",
     "check": "node --check tools/probe-web.mjs",
     "dev": "cd src-tauri && cargo run",
     "build": "npx tauri build",
