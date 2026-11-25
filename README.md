@@ -143,6 +143,14 @@ docs/DEVELOPMENT.md         开发与验证手册
 | 运行时安装/更新 | 自动（首次启动安装，启动后自动检查更新） |
 | 启动进度 | splash 轮询 `runtime_status`：阶段 + 已用时 |
 
+## 安全与健壮性
+
+- 启动 URL 与外链 URL 都做了严格校验：只接受 loopback / 白名单 scheme，拒绝控制字符；
+- 运行时安装/更新走暂存 + 原子替换；进程登记表用 RAII 保证注销，退出时按进程组清理；
+- 单实例 socket、窗口状态写入、陈旧运行时清理都做了防误删/防竞态加固；
+- 上游版本号严格按 semver 解析，npm 错误文本不会被当成版本；
+- 桌面桥接契约与「dshDesktop 不实现」决策见 `docs/DESKTOP_BRIDGE.zh.md`。
+
 ## 已验证（Linux + WebKitGTK 2.52）
 
 - `dsh web` 由外壳拉起，从 stdout 解析出 `http://127.0.0.1:<port>/?token=…`；
@@ -158,6 +166,7 @@ docs/DEVELOPMENT.md         开发与验证手册
   正在跑的服务不受影响；
 - `DSH_TAURI_OFFLINE=1` 且本地无运行时，显示带手动命令的错误页而不是空白窗口；
 - 更新走 `<runtime>.new-<pid>` 暂存目录 + 原子替换，安装中断不会破坏已装好的运行时。
+- 三层自动验证：`npm test`（真运行时契约探针）、`npm run test:unit`（注入脚本与 CLI 单测）、`npm run test:contract`（上游桥接漂移守卫，10 项静态检查）；Rust 单测 90 项；CI 全部执行。
 
 ## 已知限制
 
