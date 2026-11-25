@@ -12,10 +12,11 @@
 ## 验证命令
 
 ```bash
-node --check tools/probe-web.mjs
+npm run check   # 检查全部 helper 脚本语法
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
+npm run verify:fast      # 离线快速门禁：语法检查 + npm 单测 + 桥接契约守卫
 cd src-tauri && cargo test && cargo build    # Rust 单测 + 构建
 ```
 
@@ -24,6 +25,10 @@ cookie + 客户端 HTML）；`npm run test:unit` 测的是 **SHIM 注入脚本�
 不需要运行时）；`npm run test:contract` 是**上游升级后的契约漂移守卫**（只读扫描 `runtime/`，
 上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
 CI 亦执行这三项。
+
+另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `test:unit` + `test:contract`
+三层：全程离线、不需要真运行时，runtime 缺失时 `test:contract` 会自动 SKIP；但真正的
+端到端确认仍须跑 `npm test`（需要运行时）。
 
 桌面桥接的精确契约，以及「`dshDesktop` 明确不实现」的决策与理由，见
 [`docs/DESKTOP_BRIDGE.zh.md`](DESKTOP_BRIDGE.zh.md)。

@@ -30,8 +30,8 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Check the probe script
-        run: node --check tools/probe-web.mjs
+      - name: Check helper script syntax
+        run: npm run check
 
       - name: Install the Tauri CLI
         run: npm ci
