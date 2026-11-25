@@ -109,6 +109,18 @@ pub fn clipboard_read() -> Result<String, String> {
     run("wl-paste", &["--no-newline"]).map_err(|error| format!("{error}（需要 wl-clipboard）"))
 }
 
+/// Classify `wl-copy`'s exit code without needing a real `ExitStatus`.
+///
+/// `Some(0)` means a clean exit; `None` as the code means the child was killed
+/// by a signal, which must also be reported rather than silently succeed.
+fn status_message(code: Option<i32>) -> Option<String> {
+    match code {
+        Some(0) => None,
+        Some(code) => Some(format!("wl-copy 退出码 {code}")),
+        None => Some("wl-copy 被信号终止".to_owned()),
+    }
+}
+
 #[tauri::command]
 pub fn clipboard_write(text: String) -> Result<(), String> {
     let mut child = Command::new("wl-copy")
@@ -119,7 +131,12 @@ pub fn clipboard_write(text: String) -> Result<(), String> {
         use std::io::Write;
         stdin.write_all(text.as_bytes()).map_err(|error| format!("cannot write to wl-copy: {error}"))?;
     }
-    child.wait().map_err(|error| format!("wl-copy failed: {error}"))?;
+    let status = child.wait().map_err(|error| format!("wl-copy failed: {error}"))?;
+    if let Some(message) = status_message(status.code()) {
+        return Err(format!(
+            "wl-copy 写入剪贴板失败：{message}（需要 wl-clipboard 与可用的 Wayland 剪贴板管理器）"
+        ));
+    }
     Ok(())
 }
 
@@ -233,7 +250,7 @@ pub const SHIM: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use super::{external_url_allowed, notify_args, picked_path, HelperOutcome};
+    use super::{external_url_allowed, notify_args, picked_path, status_message, HelperOutcome};
 
     #[test]
     fn allows_https() {
@@ -443,5 +460,28 @@ mod tests {
         let args = notify_args("", "");
         assert_eq!(args.len(), 5);
         assert_eq!(args, vec!["-a", "DSH", "--", "", ""]);
+    }
+
+    #[test]
+    fn status_message_accepts_clean_exit() {
+        assert_eq!(status_message(Some(0)), None);
+    }
+
+    #[test]
+    fn status_message_reports_exit_code_one() {
+        let message = status_message(Some(1)).expect("non-zero exit must fail");
+        assert!(message.contains('1'), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn status_message_reports_exit_code_two() {
+        let message = status_message(Some(2)).expect("non-zero exit must fail");
+        assert!(message.contains('2'), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn status_message_reports_signal_termination() {
+        let message = status_message(None).expect("signal termination must fail");
+        assert!(message.contains("信号"), "unexpected message: {message}");
     }
 }
