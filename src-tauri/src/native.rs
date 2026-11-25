@@ -26,21 +26,68 @@ pub(crate) fn external_url_allowed(url: &str) -> bool {
     })
 }
 
-/// Run a helper and capture stdout, reporting the failure text verbatim.
-fn run(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|error| format!("cannot run {program}: {error}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(if stderr.is_empty() {
-            format!("{program} exited with {}", output.status)
-        } else {
-            stderr
-        });
+/// Outcome of a helper invocation. The exit code is classified here, once,
+/// instead of being inferred from an error message.
+enum HelperOutcome {
+    Ok(String),
+    Cancelled,
+    Failed(String),
+}
+
+impl HelperOutcome {
+    /// Pure classification of a finished helper. `code` is
+    /// `output.status.code()` (`None` when the helper was killed by a signal);
+    /// `cancel_code` is the exit code this caller treats as cancellation.
+    fn from_code(code: Option<i32>, cancel_code: Option<i32>, program: &str) -> Self {
+        match code {
+            Some(0) => Self::Ok(String::new()),
+            Some(code) if Some(code) == cancel_code => Self::Cancelled,
+            Some(code) => Self::Failed(format!("{program} exited with exit status: {code}")),
+            None => Self::Failed(format!("{program} terminated by signal")),
+        }
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Run a helper and classify its exit code. `cancel_code` marks the one exit
+/// code that means "the user cancelled"; with `None`, every non-zero exit is
+/// a failure.
+fn run_helper(program: &str, args: &[&str], cancel_code: Option<i32>) -> HelperOutcome {
+    let output = match Command::new(program).args(args).output() {
+        Ok(output) => output,
+        Err(error) => return HelperOutcome::Failed(format!("cannot run {program}: {error}")),
+    };
+    match HelperOutcome::from_code(output.status.code(), cancel_code, program) {
+        HelperOutcome::Ok(_) => {
+            HelperOutcome::Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        }
+        HelperOutcome::Cancelled => HelperOutcome::Cancelled,
+        HelperOutcome::Failed(_) => {
+            // Keep stderr taking precedence, and otherwise reproduce the old
+            // `run` message verbatim (including signal termination).
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            HelperOutcome::Failed(if stderr.is_empty() {
+                format!("{program} exited with {}", output.status)
+            } else {
+                stderr
+            })
+        }
+    }
+}
+
+/// Run a helper and capture stdout, reporting the failure text verbatim.
+/// Every non-zero exit is a failure here; there is no cancellation case.
+fn run(program: &str, args: &[&str]) -> Result<String, String> {
+    match run_helper(program, args, None) {
+        HelperOutcome::Ok(stdout) => Ok(stdout),
+        HelperOutcome::Failed(error) => Err(error),
+        HelperOutcome::Cancelled => Err(format!("{program} was cancelled")),
+    }
+}
+
+/// Normalize zenity's stdout into a usable directory path.
+fn picked_path(stdout: &str) -> Option<String> {
+    let path = stdout.trim().trim_end_matches('/');
+    (!path.is_empty()).then(|| path.to_owned())
 }
 
 /// Folder chooser for the workspace picker (`__DSH_DIRECTORY_PICKER__`).
@@ -49,14 +96,11 @@ pub fn pick_directory(title: Option<String>) -> Result<Option<String>, String> {
     let mut args = vec!["--file-selection", "--directory", "--title"];
     let title = title.unwrap_or_else(|| "选择目录".to_owned());
     args.push(title.as_str());
-    match run("zenity", &args) {
-        Ok(stdout) => {
-            let path = stdout.trim().trim_end_matches('/');
-            Ok((!path.is_empty()).then(|| path.to_owned()))
-        }
-        // zenity exits 1 when the user cancels; that is not an error.
-        Err(error) if error.contains("exited with exit status: 1") => Ok(None),
-        Err(error) => Err(error)
+    // zenity exits 1 when the user cancels; compare the code, never error text.
+    match run_helper("zenity", &args, Some(1)) {
+        HelperOutcome::Ok(stdout) => Ok(picked_path(&stdout)),
+        HelperOutcome::Cancelled => Ok(None),
+        HelperOutcome::Failed(error) => Err(error),
     }
 }
 
@@ -179,7 +223,7 @@ pub const SHIM: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use super::external_url_allowed;
+    use super::{external_url_allowed, picked_path, HelperOutcome};
 
     #[test]
     fn allows_https() {
@@ -269,5 +313,89 @@ mod tests {
         assert!(!external_url_allowed("https"));
         assert!(!external_url_allowed("mailto"));
         assert!(!external_url_allowed("httpsx://example.com"));
+    }
+
+    #[test]
+    fn picked_path_returns_plain_path() {
+        assert_eq!(
+            picked_path("/home/user/project"),
+            Some("/home/user/project".to_owned())
+        );
+    }
+
+    #[test]
+    fn picked_path_strips_trailing_slashes() {
+        assert_eq!(
+            picked_path("/home/user/project///"),
+            Some("/home/user/project".to_owned())
+        );
+    }
+
+    #[test]
+    fn picked_path_strips_surrounding_whitespace() {
+        assert_eq!(
+            picked_path("  /home/user/project  \n"),
+            Some("/home/user/project".to_owned())
+        );
+    }
+
+    #[test]
+    fn picked_path_rejects_empty() {
+        assert_eq!(picked_path(""), None);
+    }
+
+    #[test]
+    fn picked_path_rejects_whitespace_only() {
+        assert_eq!(picked_path("  \n\t "), None);
+    }
+
+    #[test]
+    fn picked_path_rejects_slashes_only() {
+        assert_eq!(picked_path("/"), None);
+        assert_eq!(picked_path("////"), None);
+    }
+
+    #[test]
+    fn cancel_code_marks_only_the_configured_cancel() {
+        assert!(matches!(
+            HelperOutcome::from_code(Some(1), Some(1), "zenity"),
+            HelperOutcome::Cancelled
+        ));
+        assert!(matches!(
+            HelperOutcome::from_code(Some(1), None, "cmd"),
+            HelperOutcome::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn success_is_ok_even_with_a_cancel_code() {
+        assert!(matches!(
+            HelperOutcome::from_code(Some(0), Some(1), "zenity"),
+            HelperOutcome::Ok(_)
+        ));
+    }
+
+    #[test]
+    fn other_exit_codes_are_failures() {
+        assert!(matches!(
+            HelperOutcome::from_code(Some(2), Some(1), "zenity"),
+            HelperOutcome::Failed(_)
+        ));
+        assert!(matches!(
+            HelperOutcome::from_code(Some(2), None, "cmd"),
+            HelperOutcome::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn signal_termination_is_failure() {
+        assert!(matches!(
+            HelperOutcome::from_code(None, Some(1), "zenity"),
+            HelperOutcome::Failed(_)
+        ));
+        assert!(matches!(
+            HelperOutcome::from_code(None, None, "cmd"),
+            HelperOutcome::Failed(_)
+        ));
     }
 }
