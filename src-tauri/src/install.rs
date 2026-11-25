@@ -23,10 +23,35 @@ pub fn npm() -> PathBuf {
 }
 
 pub fn npm_available() -> Result<(), String> {
-    match exec::run(&npm(), &["--version"], Duration::from_secs(30)) {
+    let program = npm();
+    match exec::run(&program, &["--version"], Duration::from_secs(30)) {
         Ok(outcome) if outcome.ok() => Ok(()),
-        _ => Err(npm_missing())
+        Ok(outcome) => Err(version_probe_error(
+            &outcome.status.to_string(),
+            &outcome.tail(4),
+            outcome.timed_out,
+            &program.display().to_string(),
+        )),
+        Err(_) => Err(npm_missing())
     }
+}
+
+/// A spawned npm that fails its version probe is a different problem from a
+/// missing npm: keep the real status, stderr and configured path for the user.
+fn version_probe_error(status_text: &str, stderr_tail: &str, timed_out: bool, npm_label: &str) -> String {
+    let detail = if timed_out {
+        format!("执行超时（30 秒），最后状态：{status_text}")
+    } else {
+        format!("执行失败，退出状态：{status_text}")
+    };
+    let tail = if stderr_tail.trim().is_empty() {
+        "（stderr 无输出）"
+    } else {
+        stderr_tail
+    };
+    format!(
+        "已找到 npm，但 `npm --version` {detail}。\n\nnpm stderr 末尾：\n{tail}\n\n当前 DSH_TAURI_NPM（npm 路径）：{npm_label}\n修复建议：确认该路径指向可执行的 npm；若 npm 不在 PATH，用 DSH_TAURI_NPM=/path/to/npm 指定后重试；若 stderr 显示脚本或依赖问题，请先修复 npm 环境。"
+    )
 }
 
 fn npm_missing() -> String {
@@ -104,7 +129,7 @@ fn run_install(prefix: &str, spec: &str, manual: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_args, install_target, manual_command, npm_missing};
+    use super::{install_args, install_target, manual_command, npm_missing, version_probe_error};
     use std::path::Path;
 
     #[test]
@@ -150,5 +175,35 @@ mod tests {
         assert!(message.contains("npm"));
         assert!(message.contains("24+"));
         assert!(message.contains("DSH_TAURI_NPM"));
+    }
+
+    #[test]
+    fn version_probe_error_reports_timeout_status_tail_and_path() {
+        let message = version_probe_error(
+            "signal: 15 (SIGTERM)",
+            "npm ERR! lifecycle script hung",
+            true,
+            "/opt/custom/bin/npm",
+        );
+        assert!(message.contains("超时"), "timeout branch must say 超时");
+        assert!(message.contains("signal: 15 (SIGTERM)"));
+        assert!(message.contains("npm ERR! lifecycle script hung"));
+        assert!(message.contains("/opt/custom/bin/npm"));
+        assert!(!message.contains("找不到可用的 npm"), "must not claim npm is missing");
+    }
+
+    #[test]
+    fn version_probe_error_reports_failure_without_timeout() {
+        let message = version_probe_error(
+            "exit status: 127",
+            "npm ERR! EACCES permission denied",
+            false,
+            "npm",
+        );
+        assert!(!message.contains("超时"), "non-timeout branch must not say 超时");
+        assert!(message.contains("exit status: 127"));
+        assert!(message.contains("npm ERR! EACCES permission denied"));
+        assert!(message.contains("npm"));
+        assert!(!message.contains("找不到可用的 npm"), "must not claim npm is missing");
     }
 }
