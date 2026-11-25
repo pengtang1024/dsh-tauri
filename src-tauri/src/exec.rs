@@ -58,6 +58,14 @@ fn signal_group(pid: i32, signal: i32) {
     }
 }
 
+/// Decide whether a timed-out helper still needs SIGKILL after the grace period.
+///
+/// Once try_wait has reaped the child, its pid may already have been reused by
+/// an unrelated process group, so signalling the group would be unsafe.
+fn should_force_kill(reaped_during_grace: bool) -> bool {
+    !reaped_during_grace
+}
+
 /// Stop every helper still in flight (called while the shell shuts down).
 ///
 /// Each registered group gets SIGTERM first; after a short grace period every
@@ -164,13 +172,17 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
             timed_out = true;
             signal_group(pid, libc::SIGTERM);
             let grace = Instant::now() + Duration::from_secs(2);
+            let mut reaped_during_grace = false;
             while Instant::now() < grace {
                 if let Ok(Some(_)) = child.try_wait() {
+                    reaped_during_grace = true;
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            signal_group(pid, libc::SIGKILL);
+            if should_force_kill(reaped_during_grace) {
+                signal_group(pid, libc::SIGKILL);
+            }
             break child.wait().map_err(|error| format!("无法回收 {}：{error}", program.display()))?;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -186,7 +198,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
 #[cfg(test)]
 mod tests {
-    use super::{kill_running, run, Registration, RUNNING};
+    use super::{kill_running, run, should_force_kill, Registration, RUNNING};
     use std::path::Path;
     use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
@@ -197,6 +209,18 @@ mod tests {
     /// Test helper: is this pid currently in the global RUNNING set?
     fn is_registered(pid: i32) -> bool {
         RUNNING.lock().map(|guard| guard.contains(&pid)).unwrap_or(false)
+    }
+
+    /// A child still alive after the grace period must be force-killed.
+    #[test]
+    fn force_kill_when_not_reaped() {
+        assert!(should_force_kill(false), "an unreaped child still needs SIGKILL");
+    }
+
+    /// A child already reaped must NOT be signalled: its pid may be reused.
+    #[test]
+    fn no_force_kill_when_reaped() {
+        assert!(!should_force_kill(true), "a reaped child must not receive SIGKILL");
     }
 
     #[test]
