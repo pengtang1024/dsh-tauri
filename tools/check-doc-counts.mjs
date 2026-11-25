@@ -5,12 +5,13 @@
  * npm unit tests (node:test test() calls in .test.mjs files under test/,
  * recursively, strict line-start match so helpers/comments are not counted).
  * It also checks the bridge contract guard's check count (the GUARD_CHECK_COUNT
- * constant in tools/check-bridge-contract.mjs) against the count documented in
- * CHANGELOG.md, without running the guard (which scans thousands of files).
+ * constant in tools/check-bridge-contract.mjs) against the counts documented in
+ * CHANGELOG.md and README.md, without running the guard (which scans thousands
+ * of files).
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
  * Prints one PASS/FAIL per check with file:line and expected/actual, then
- * "SUMMARY: 5 checks, M FAILS". Exits 1 when any check fails, else 0.
+ * "SUMMARY: 6 checks, M FAILS". Exits 1 when any check fails, else 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -57,6 +58,7 @@ const checks = [
   { name: 'DESKTOP_BRIDGE.zh.md', file: 'docs/DESKTOP_BRIDGE.zh.md', pattern: /cargo test`?\s+(\d+) passed/, expected: rustTestCount },
   { name: 'README.md npm 单测', file: 'README.md', pattern: /注入脚本、CLI、错误页与启动页单测，(\d+) 项/, expected: npmTestCount },
   { name: 'CHANGELOG.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'CHANGELOG.md', pattern: /契约漂移守卫.*?静态检查（(\d+) 项/, expected: guardCount },
+  { name: 'README.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'README.md', pattern: /上游桥接漂移守卫，(\d+) 项静态检查/, expected: guardCount },
 ];
 
 const FAILS = [];
