@@ -6,11 +6,13 @@
  * local shell sources for hard-throw paths that would need a bridge shim.
  * Also checks that the local shell still injects the bridge SHIM into both
  * windows (boot + main), and that tauri.conf.json keeps withGlobalTauri true
- * so globalThis.__TAURI__.core.invoke exists for the SHIM and boot page.
+ * so globalThis.__TAURI__.core.invoke exists for the SHIM and boot page, and
+ * that the shell never injects a dshDesktop global (documented decision:
+ * docs/DESKTOP_BRIDGE.zh.md §5).
  * Exits 0 on a known/green baseline, 1 only when a new hard-throw appears,
  * when the shell writes data-platform, when a SHIM injection point is
- * missing, or when withGlobalTauri is not true. Runtime absent => one SKIP
- * line, exit 0.
+ * missing, when withGlobalTauri is not true, or when the shell injects a
+ * dshDesktop global. Runtime absent => one SKIP line, exit 0.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -254,6 +256,42 @@ if (globalTauriOk) {
   FAILS.push(globalTauriFail + ' @ ' + globalTauriEvidence);
 }
 
-const checks = 1 + allowed.length + unexpected.length + 1 + 1 + 1;
+// ---------------------------------------------------------------------------
+// 6) The shell must never define/inject a dshDesktop global (documented §5).
+//    Only local src-tauri sources are scanned; the signal regex above that
+//    mentions dshDesktop guards upstream hard-throws and is not a shell write.
+// ---------------------------------------------------------------------------
+const desktopRoots = [
+  { dir: join(root, 'src-tauri', 'src'), suffixes: new Set(['.rs']) },
+  { dir: join(root, 'src-tauri', 'dist'), suffixes: new Set(['.html', '.js']) },
+].filter((entry) => existsSync(entry.dir));
+const dshDesktopInject = /\b(?:globalThis|window|self|global)\s*\.\s*dshDesktop\s*=|(?:^\s*|[{[,\s]*)['"`]?dshDesktop['"`]?\s*:|\binitialization_script\b[^\n]*dshDesktop|\bdshDesktop\b[^\n]*\binitialization_script\b/;
+function* walkDesktop(dir, suffixes) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    if (entry.name === 'node_modules') continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) { yield* walkDesktop(path, suffixes); continue; }
+    if (entry.isFile() && suffixes.has(entry.name.slice(entry.name.lastIndexOf('.')))) yield path;
+  }
+}
+let desktopHits = 0;
+for (const { dir, suffixes } of desktopRoots) {
+  for (const file of walkDesktop(dir, suffixes)) {
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    text.split('\n').forEach((line, i) => {
+      if (!dshDesktopInject.test(line)) return;
+      desktopHits++;
+      const evidence = `${rel(file)}:${i + 1}`;
+      emit('FAIL', 'dshDesktop global injection in shell source (see docs/DESKTOP_BRIDGE.zh.md §5)', evidence);
+      FAILS.push(`dshDesktop global injection @ ${evidence} — see docs/DESKTOP_BRIDGE.zh.md §5: providing dshDesktop flips desktop sign-in/keyboard behavior and must stay unimplemented`);
+    });
+  }
+}
+if (desktopHits === 0) emit('PASS', 'dshDesktop global not injected (documented decision)', desktopRoots.map((entry) => rel(entry.dir)).join(', '));
+
+const checks = 1 + allowed.length + unexpected.length + 1 + 1 + 1 + 1;
 console.log(`SUMMARY: ${checks} checks, ${FAILS.length} FAIL${FAILS.length === 1 ? '' : 'S'} (${files.length} runtime source files scanned)`);
 process.exit(FAILS.length === 0 ? 0 : 1);
