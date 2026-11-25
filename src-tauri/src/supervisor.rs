@@ -168,6 +168,11 @@ fn exit_reason(pid: u32) -> String {
     }
 }
 
+/// `libc::kill` returns 0 on success and -1 (with errno set) on failure.
+fn term_result_ok(rc: i32) -> bool {
+    rc == 0
+}
+
 /// Ask the server to stop, then forget the handle. Called from the tray/menu.
 pub fn shutdown() {
     SHUTTING_DOWN.store(true, Ordering::Relaxed);
@@ -178,7 +183,16 @@ pub fn shutdown() {
     if let Some(session) = guard.as_mut() {
         let pid = session.child.id();
         // SIGTERM lets the server flush sessions; SIGKILL would leave WAL debris.
-        let _ = Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
+        // SAFETY: `pid` comes from the `Child` we spawned ourselves; sending a
+        // signal to that process has no memory-safety implications. The only
+        // failure mode is a stale/unreachable pid, reported via errno below.
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        if !term_result_ok(result) {
+            eprintln!(
+                "[dsh-tauri] cannot SIGTERM server {pid}: {}",
+                std::io::Error::last_os_error()
+            );
+        }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             if let Ok(Some(_)) = session.child.try_wait() {
@@ -189,4 +203,19 @@ pub fn shutdown() {
         let _ = session.child.kill();
     }
     *guard = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::term_result_ok;
+
+    #[test]
+    fn term_result_ok_on_success() {
+        assert!(term_result_ok(0));
+    }
+
+    #[test]
+    fn term_result_not_ok_on_failure() {
+        assert!(!term_result_ok(-1));
+    }
 }
