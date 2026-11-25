@@ -14,8 +14,19 @@
 ```bash
 node --check tools/probe-web.mjs
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
+npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
+npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
 cd src-tauri && cargo test && cargo build    # Rust 单测 + 构建
 ```
+
+三项 npm 测试的分工：`npm test` 是**真运行时契约探针**（拉起真实 `dsh web` 验证 303 +
+cookie + 客户端 HTML）；`npm run test:unit` 测的是 **SHIM 注入脚本自身的行为**（纯 node 单测，
+不需要运行时）；`npm run test:contract` 是**上游升级后的契约漂移守卫**（只读扫描 `runtime/`，
+上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
+CI 亦执行这三项。
+
+桌面桥接的精确契约，以及「`dshDesktop` 明确不实现」的决策与理由，见
+[`docs/DESKTOP_BRIDGE.zh.md`](DESKTOP_BRIDGE.zh.md)。
 
 `npm test` 需要先装运行时：
 

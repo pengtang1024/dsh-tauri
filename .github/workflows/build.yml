@@ -35,8 +35,14 @@ jobs:
       - name: Install the Tauri CLI
         run: npm ci
 
+      - name: Run shell unit tests
+        run: npm run test:unit
+
       - name: Install the DSH runtime
         run: npm install --prefix runtime @deepseek-ai/dsh
+
+      - name: Check bridge contract drift
+        run: npm run test:contract
 
       - name: Test the runtime contract
         run: npm test
