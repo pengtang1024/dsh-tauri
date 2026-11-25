@@ -5,10 +5,12 @@
  * Scans the installed runtime client packages (never writes to them) and the
  * local shell sources for hard-throw paths that would need a bridge shim.
  * Also checks that the local shell still injects the bridge SHIM into both
- * windows (boot + main).
+ * windows (boot + main), and that tauri.conf.json keeps withGlobalTauri true
+ * so globalThis.__TAURI__.core.invoke exists for the SHIM and boot page.
  * Exits 0 on a known/green baseline, 1 only when a new hard-throw appears,
- * when the shell writes data-platform, or when a SHIM injection point is
- * missing. Runtime absent => one SKIP line, exit 0.
+ * when the shell writes data-platform, when a SHIM injection point is
+ * missing, or when withGlobalTauri is not true. Runtime absent => one SKIP
+ * line, exit 0.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -228,6 +230,30 @@ if (shimLines.length === 2) {
   emit('WARN', 'SHIM injected into more than two windows (manual review)', `${shimLines.length} sites: ${shimEvidence}`);
 }
 
-const checks = 1 + allowed.length + unexpected.length + 1 + 1;
+// ---------------------------------------------------------------------------
+// 5) withGlobalTauri must be true so __TAURI__.core.invoke is available to the
+//    injected SHIM and the boot page.
+// ---------------------------------------------------------------------------
+const tauriConfPath = join(root, 'src-tauri', 'tauri.conf.json');
+const globalTauriFail = 'withGlobalTauri must be true: SHIM and boot page rely on __TAURI__.core.invoke';
+let globalTauriOk = false;
+let globalTauriEvidence = rel(tauriConfPath);
+try {
+  const confText = readFileSync(tauriConfPath, 'utf8');
+  const conf = JSON.parse(confText);
+  if (conf && conf.app && conf.app.withGlobalTauri === true) {
+    const line = confText.split('\n').findIndex((l) => /"withGlobalTauri"\s*:/.test(l)) + 1;
+    globalTauriOk = true;
+    if (line > 0) globalTauriEvidence += ':' + line;
+  }
+} catch { /* missing/unparseable config => FAIL below */ }
+if (globalTauriOk) {
+  emit('PASS', 'withGlobalTauri is true (global Tauri bridge available)', globalTauriEvidence);
+} else {
+  emit('FAIL', globalTauriFail, globalTauriEvidence);
+  FAILS.push(globalTauriFail + ' @ ' + globalTauriEvidence);
+}
+
+const checks = 1 + allowed.length + unexpected.length + 1 + 1 + 1;
 console.log(`SUMMARY: ${checks} checks, ${FAILS.length} FAIL${FAILS.length === 1 ? '' : 'S'} (${files.length} runtime source files scanned)`);
 process.exit(FAILS.length === 0 ? 0 : 1);
