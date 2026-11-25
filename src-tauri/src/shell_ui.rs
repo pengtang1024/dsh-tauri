@@ -10,7 +10,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
 /// Window geometry remembered across launches.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowState {
     pub width: f64,
     pub height: f64,
@@ -30,10 +30,21 @@ fn state_path() -> PathBuf {
     home.join(".dsh").join("dsh-tauri-window-state.json")
 }
 
+/// Serialize remembered geometry. Pure: touches neither the filesystem nor a window.
+fn encode_state(state: &WindowState) -> String {
+    serde_json::to_string_pretty(state).unwrap_or_default()
+}
+
+/// Parse remembered geometry. Empty, truncated or ill-typed input yields `None`;
+/// unknown extra fields are ignored by serde's default behaviour.
+fn decode_state(text: &str) -> Option<WindowState> {
+    serde_json::from_str(text).ok()
+}
+
 pub fn load_window_state() -> WindowState {
     fs::read_to_string(state_path())
         .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
+        .and_then(|text| decode_state(&text))
         .unwrap_or_default()
 }
 
@@ -51,10 +62,26 @@ pub fn save_window_state(window: &WebviewWindow<Wry>) {
     };
     let path = state_path();
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        if let Err(error) = fs::create_dir_all(parent) {
+            eprintln!("[dsh-tauri] cannot create window state directory: {error}");
+            return;
+        }
     }
-    if let Err(error) = fs::write(&path, serde_json::to_string_pretty(&state).unwrap_or_default()) {
+    // Stage next to the final file so `rename` stays on the same filesystem and
+    // replaces the state atomically: a concurrent save or a kill mid-write can
+    // never leave a torn JSON document at the final path.
+    let mut staging = path.clone().into_os_string();
+    staging.push(format!(".tmp-{}", std::process::id()));
+    let staging = PathBuf::from(staging);
+    if let Err(error) = fs::write(&staging, encode_state(&state))
+        .and_then(|()| fs::rename(&staging, &path))
+    {
         eprintln!("[dsh-tauri] cannot persist window state: {error}");
+        if let Err(cleanup) = fs::remove_file(&staging) {
+            if cleanup.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("[dsh-tauri] cannot remove temporary window state: {cleanup}");
+            }
+        }
     }
 }
 
@@ -314,7 +341,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::urlencoding;
+    use super::{decode_state, encode_state, urlencoding, WindowState};
 
     #[test]
     fn escapes_everything_except_unreserved_bytes() {
@@ -324,5 +351,56 @@ mod tests {
     #[test]
     fn keeps_plain_text_readable() {
         assert_eq!(urlencoding("DSH-2.0.24"), "DSH-2.0.24");
+    }
+
+    #[test]
+    fn roundtrip_preserves_all_fields_without_position() {
+        let state = WindowState {
+            width: 1440.5,
+            height: 900.25,
+            x: None,
+            y: None,
+            maximized: true
+        };
+        let decoded = decode_state(&encode_state(&state));
+        assert_eq!(decoded, Some(state));
+    }
+
+    #[test]
+    fn roundtrip_preserves_all_fields_with_position() {
+        let state = WindowState {
+            width: 1280.0,
+            height: 840.0,
+            x: Some(-12),
+            y: Some(345),
+            maximized: false
+        };
+        let decoded = decode_state(&encode_state(&state));
+        assert_eq!(decoded, Some(state));
+    }
+
+    #[test]
+    fn decode_rejects_empty_truncated_and_wrong_types() {
+        assert_eq!(decode_state(""), None);
+        assert_eq!(decode_state("{\"width\": 1280.0, \"height\": 840.0"), None);
+        assert_eq!(
+            decode_state("{\"width\": \"wide\", \"height\": 840.0, \"x\": null, \"y\": null, \"maximized\": false}"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_ignores_unknown_extra_fields() {
+        let json = "{\"width\": 1024.0, \"height\": 768.0, \"x\": 10, \"y\": 20, \"maximized\": true, \"futureField\": 42}";
+        assert_eq!(
+            decode_state(json),
+            Some(WindowState {
+                width: 1024.0,
+                height: 768.0,
+                x: Some(10),
+                y: Some(20),
+                maximized: true
+            })
+        );
     }
 }
