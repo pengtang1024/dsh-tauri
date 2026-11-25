@@ -13,10 +13,11 @@
 
 ```bash
 npm run check   # 检查全部 helper 脚本语法
+npm run check:docs                           # 校验三处文档测试数与 Rust 源码一致（verify:fast 已包含）
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
-npm run verify:fast      # 离线快速门禁：语法检查 + npm 单测 + 桥接契约守卫
+npm run verify:fast      # 离线快速门禁：语法检查 + 文档测试数校验 + npm 单测 + 桥接契约守卫
 npm run verify:all      # 全量离线门禁：verify:fast + Rust 单测
 npm run cargo -- test                        # Rust 单测
 npm run cargo -- build                       # Rust 构建
@@ -32,8 +33,11 @@ cookie + 客户端 HTML）；`npm run test:unit` 测的是 **SHIM 注入脚本�
 上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
 CI 亦执行这三项。
 
-另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `test:unit` + `test:contract`
-三层：全程离线、不需要真运行时，runtime 缺失时 `test:contract` 会自动 SKIP；但真正的
+另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `check:docs` + `test:unit`
++ `test:contract` 四层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、
+`docs/DESKTOP_BRIDGE.zh.md`）里硬编码的 Rust 单测数与 `src-tauri/src/**/*.rs` 的实际
+`#[test]` 数量一致，漂移即 FAIL；全程离线、不需要真运行时，runtime 缺失时
+`test:contract` 会自动 SKIP；但真正的
 端到端确认仍须跑 `npm test`（需要运行时）。`npm run verify:all` 则在 `verify:fast`
 基础上再跑一遍 `cargo test`（经 `tools/cargo.mjs` 包装脚本调用，无需手动设置
 `CARGO_TARGET_DIR`）；同样地，端到端真探针仍需 `npm test`。
