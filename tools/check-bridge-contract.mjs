@@ -4,8 +4,11 @@
  *
  * Scans the installed runtime client packages (never writes to them) and the
  * local shell sources for hard-throw paths that would need a bridge shim.
- * Exits 0 on a known/green baseline, 1 only when a new hard-throw appears or
- * when the shell writes data-platform. Runtime absent => one SKIP line, exit 0.
+ * Also checks that the local shell still injects the bridge SHIM into both
+ * windows (boot + main).
+ * Exits 0 on a known/green baseline, 1 only when a new hard-throw appears,
+ * when the shell writes data-platform, or when a SHIM injection point is
+ * missing. Runtime absent => one SKIP line, exit 0.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -202,6 +205,29 @@ for (const dir of localRoots) {
 }
 if (platformHits === 0) emit('PASS', 'no data-platform write in src-tauri/src or src-tauri/dist', localRoots.map(rel).join(', '));
 
-const checks = 1 + allowed.length + unexpected.length + 1;
+// ---------------------------------------------------------------------------
+// 4) The local shell must still inject the bridge SHIM into both windows.
+// ---------------------------------------------------------------------------
+const shellUiPath = join(root, 'src-tauri', 'src', 'shell_ui.rs');
+const shimInjection = /\.initialization_script\s*\(\s*crate::native::SHIM\s*\)/g;
+const shimLines = [];
+if (existsSync(shellUiPath)) {
+  const shellUi = readFileSync(shellUiPath, 'utf8');
+  let match;
+  while ((match = shimInjection.exec(shellUi)) !== null) {
+    shimLines.push(shellUi.slice(0, match.index).split('\n').length);
+  }
+}
+const shimEvidence = shimLines.map((line) => `${rel(shellUiPath)}:${line}`).join(', ');
+if (shimLines.length === 2) {
+  emit('PASS', 'bridge SHIM injected into both windows', shimEvidence);
+} else if (shimLines.length < 2) {
+  emit('FAIL', 'SHIM not injected into both windows', `found ${shimLines.length}${shimEvidence ? ' at ' + shimEvidence : ''}`);
+  FAILS.push(`SHIM not injected into both windows: found ${shimLines.length}${shimEvidence ? ' at ' + shimEvidence : ''}`);
+} else {
+  emit('WARN', 'SHIM injected into more than two windows (manual review)', `${shimLines.length} sites: ${shimEvidence}`);
+}
+
+const checks = 1 + allowed.length + unexpected.length + 1 + 1;
 console.log(`SUMMARY: ${checks} checks, ${FAILS.length} FAIL${FAILS.length === 1 ? '' : 'S'} (${files.length} runtime source files scanned)`);
 process.exit(FAILS.length === 0 ? 0 : 1);
