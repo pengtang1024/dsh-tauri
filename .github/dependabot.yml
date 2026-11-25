@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # 外壳的构建依赖（@tauri-apps/cli），按周检查更新。
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+
+  # 本地开发用的运行时目录，实际装着 @deepseek-ai/dsh；同样按周检查更新。
+  - package-ecosystem: npm
+    directory: '/runtime'
+    schedule:
+      interval: weekly
+
+  # 保持 CI / 构建使用的 Actions 为最新版本。
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
