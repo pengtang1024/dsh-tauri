@@ -56,12 +56,25 @@ impl Staging {
             })?;
         }
         if let Err(error) = std::fs::rename(&self.stage, &self.target) {
-            if existing {
-                let _ = std::fs::rename(&old, &self.target);
-            }
+            let rollback_ok = if existing {
+                match std::fs::rename(&old, &self.target) {
+                    Ok(()) => true,
+                    Err(rollback_error) => {
+                        eprintln!(
+                            "[runtime] 回滚失败：无法把 {} 移回 {}：{rollback_error}",
+                            old.display(), self.target.display()
+                        );
+                        false
+                    }
+                }
+            } else {
+                // 原本就没有旧运行时可回滚，绝不声称已恢复。
+                false
+            };
             return Err(format!(
-                "无法把新运行时移动到 {}：{error}（旧运行时已恢复）",
-                self.target.display()
+                "无法把新运行时移动到 {}：{error}{}",
+                self.target.display(),
+                rollback_message(&self.target, &old, rollback_ok)
             ));
         }
         self.committed = true;
@@ -87,6 +100,19 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(format!(".{suffix}-{}", std::process::id()));
     PathBuf::from(name)
+}
+
+/// 交换失败后返回给用户的错误尾句：只有回滚确实成功时才声称旧运行时已恢复；
+/// 否则指出旧树与正式路径，并要求人工介入，附手动恢复命令。
+fn rollback_message(target: &Path, old: &Path, rollback_ok: bool) -> String {
+    if rollback_ok {
+        "（旧运行时已恢复）".to_string()
+    } else {
+        format!(
+            "（【严重】回滚也失败：旧运行时仍在 {}，正式路径 {} 不存在，需要人工介入恢复；请手动执行 mv {} {}）",
+            old.display(), target.display(), old.display(), target.display()
+        )
+    }
 }
 
 /// Remove a file, directory or symlink; a missing path is not an error.
@@ -150,7 +176,7 @@ fn clean_stale(target: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_stale, is_stale_sibling, remove, sibling, Staging};
+    use super::{clean_stale, is_stale_sibling, remove, rollback_message, sibling, Staging};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -326,6 +352,28 @@ mod tests {
         assert_eq!(fs::read_to_string(backup_dir.join("keep")).unwrap(), "user data");
         assert!(notes_file.is_file(), "user target.old-notes.txt must survive");
         assert_eq!(fs::read_to_string(&notes_file).unwrap(), "user notes");
+    }
+
+    #[test]
+    fn rollback_message_success_keeps_restored_wording() {
+        let target = Path::new("/tmp/dsh-runtime");
+        let old = Path::new("/tmp/dsh-runtime.old-123");
+
+        let message = rollback_message(target, old, true);
+        assert!(message.contains("已恢复"), "成功回滚须沿用「已恢复」语义：{message}");
+    }
+
+    #[test]
+    fn rollback_message_failure_never_claims_restored_and_shows_manual_mv() {
+        let target = Path::new("/tmp/dsh-runtime");
+        let old = Path::new("/tmp/dsh-runtime.old-123");
+
+        let message = rollback_message(target, old, false);
+        assert!(!message.contains("已恢复"), "回滚失败绝不能声称已恢复：{message}");
+        assert!(message.contains(&old.display().to_string()), "须给出旧树路径：{message}");
+        assert!(message.contains(&target.display().to_string()), "须给出正式路径：{message}");
+        assert!(message.contains("mv"), "须给出手动恢复命令：{message}");
+        assert!(message.contains("人工介入"), "须突出需要人工介入：{message}");
     }
 
     #[cfg(unix)]
