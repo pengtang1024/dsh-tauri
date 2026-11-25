@@ -19,6 +19,7 @@ npm run test:unit                            # 注入脚本契约单测（node -
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
 npm run verify:fast      # 离线快速门禁：语法检查 + 文档测试数校验 + npm 单测 + 桥接契约守卫
 npm run verify:all      # 全量离线门禁：verify:fast + Rust 单测
+npm run verify:e2e   # 全量离线门禁 + 真运行时探针（自动使用工作区临时 DSH_HOME 并清理）
 npm run cargo -- test                        # Rust 单测
 npm run cargo -- build                       # Rust 构建
 ```
@@ -41,6 +42,9 @@ CI 亦执行这三项。
 端到端确认仍须跑 `npm test`（需要运行时）。`npm run verify:all` 则在 `verify:fast`
 基础上再跑一遍 `cargo test`（经 `tools/cargo.mjs` 包装脚本调用，无需手动设置
 `CARGO_TARGET_DIR`）；同样地，端到端真探针仍需 `npm test`。
+`npm run verify:e2e` 则在 `verify:all` 之后再跑一遍真运行时探针（`test:clean` 包装脚本）：
+每次在运行中自动建工作区内临时目录 `.dsh-probe-<pid>` 作为 `DSH_HOME`，结束时
+自动删除，不碰 `~/.dsh`，失败或中断也不会留下残留。
 
 桌面桥接的精确契约，以及「`dshDesktop` 明确不实现」的决策与理由，见
 [`docs/DESKTOP_BRIDGE.zh.md`](DESKTOP_BRIDGE.zh.md)。
