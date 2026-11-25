@@ -98,7 +98,8 @@ fn remove(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Remove `.new-*` / `.old-*` siblings left next to the installed runtime.
+/// Remove `<runtime>.new-<pid>` / `<runtime>.old-<pid>` siblings left next to
+/// the installed runtime. Lookalike names created by the user are preserved.
 ///
 /// Called early at startup, before anything is installed or started: a SIGTERM
 /// during an install leaves the staging tree behind, and a finished update keeps
@@ -108,17 +109,39 @@ pub fn clean_stale_runtime() {
     clean_stale(&crate::runtime::install_dir());
 }
 
-/// Remove `<name>.new-*` / `<name>.old-*` siblings left by an earlier run.
+/// Whether `entry_name` is exactly one of the two sibling shapes created by
+/// `sibling()`: `<target_name>.new-<digits>` or `<target_name>.old-<digits>`.
+///
+/// The digits are the installer PID, so at least one ASCII digit is required and
+/// nothing may follow them. Everything else — a user's `.new-backup` directory,
+/// a `.old-notes.txt` file, a partial suffix — must be left alone: deletion is
+/// destructive, so the match has to be exact. An empty target name never matches.
+fn is_stale_sibling(entry_name: &str, target_name: &str) -> bool {
+    if target_name.is_empty() {
+        return false;
+    }
+    let Some(suffix) = entry_name.strip_prefix(&format!("{target_name}.")) else {
+        return false;
+    };
+    let Some(digits) = suffix
+        .strip_prefix("new-")
+        .or_else(|| suffix.strip_prefix("old-"))
+    else {
+        return false;
+    };
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Remove `<name>.new-<digits>` / `<name>.old-<digits>` siblings left by an
+/// earlier run; unrelated lookalikes are never touched.
 fn clean_stale(target: &Path) {
     let (Some(parent), Some(name)) = (target.parent(), target.file_name()) else { return };
-    let prefix = format!("{}.", name.to_string_lossy());
+    let name = name.to_string_lossy();
     let Ok(entries) = std::fs::read_dir(parent) else { return };
     for entry in entries.flatten() {
         let entry_name = entry.file_name();
         let entry_name = entry_name.to_string_lossy();
-        let stale = entry_name.starts_with(&prefix)
-            && (entry_name.contains(".new-") || entry_name.contains(".old-"));
-        if stale {
+        if is_stale_sibling(&entry_name, &name) {
             eprintln!("[runtime] 清理上次运行留下的 {}", entry.path().display());
             let _ = remove(&entry.path());
         }
@@ -127,7 +150,7 @@ fn clean_stale(target: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_stale, remove, sibling, Staging};
+    use super::{clean_stale, is_stale_sibling, remove, sibling, Staging};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -248,6 +271,26 @@ mod tests {
     }
 
     #[test]
+    fn is_stale_sibling_matches_only_exact_pid_siblings() {
+        // The two shapes Staging::sibling() can actually create.
+        assert!(is_stale_sibling("runtime.new-12345", "runtime"));
+        assert!(is_stale_sibling("runtime.old-9", "runtime"));
+
+        // Lookalikes that must survive a destructive cleanup.
+        assert!(!is_stale_sibling("runtime.new-backup", "runtime"));
+        assert!(!is_stale_sibling("runtime.old-notes", "runtime"));
+        assert!(!is_stale_sibling("runtime.new-", "runtime"));          // no digits
+        assert!(!is_stale_sibling("runtime.new-12x", "runtime"));       // not all digits
+        assert!(!is_stale_sibling("runtime-backup.new-1", "runtime"));  // wrong base
+        assert!(!is_stale_sibling("other.new-1", "runtime"));           // different base
+        assert!(!is_stale_sibling("runtime.new-1.extra", "runtime"));   // trailing junk
+
+        // Degenerate target names never match.
+        assert!(!is_stale_sibling(".new-1", ""));
+        assert!(!is_stale_sibling("runtime", "runtime"));
+    }
+
+    #[test]
     fn clean_stale_only_removes_matching_siblings() {
         let _guard = serial();
         let case = TempCase::new("clean");
@@ -259,20 +302,30 @@ mod tests {
         let plain_sibling = root.join("target-backup");
         let unrelated_file = root.join("targets.txt");
         let other_prefix = root.join(format!("other.new-{}", 53333));
+        // User-created lookalikes with the target's own name must never be deleted.
+        let backup_dir = root.join("target.new-backup");
+        let notes_file = root.join("target.old-notes.txt");
 
         fs::create_dir_all(&new_dir).unwrap();
         fs::create_dir_all(&old_dir).unwrap();
         fs::create_dir_all(&plain_sibling).unwrap();
         fs::write(&unrelated_file, "keep me").unwrap();
         fs::create_dir_all(&other_prefix).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(&backup_dir.join("keep"), "user data").unwrap();
+        fs::write(&notes_file, "user notes").unwrap();
 
         clean_stale(&target);
 
-        assert!(!new_dir.exists(), "target.new-* must be removed");
-        assert!(!old_dir.exists(), "target.old-* must be removed");
+        assert!(!new_dir.exists(), "target.new-<pid> must be removed");
+        assert!(!old_dir.exists(), "target.old-<pid> must be removed");
         assert!(plain_sibling.is_dir(), "unrelated sibling directory must survive");
         assert!(unrelated_file.is_file(), "unrelated similar-prefix file must survive");
         assert!(other_prefix.is_dir(), "different-base .new-* must survive");
+        assert!(backup_dir.is_dir(), "user target.new-backup directory must survive");
+        assert_eq!(fs::read_to_string(backup_dir.join("keep")).unwrap(), "user data");
+        assert!(notes_file.is_file(), "user target.old-notes.txt must survive");
+        assert_eq!(fs::read_to_string(&notes_file).unwrap(), "user notes");
     }
 
     #[cfg(unix)]
