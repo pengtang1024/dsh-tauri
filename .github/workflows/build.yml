@@ -13,6 +13,7 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +46,7 @@ jobs:
         run: npm run test:contract
 
       - name: Test the runtime contract
+        timeout-minutes: 5
         run: npm test
 
       - name: Test the Rust shell
