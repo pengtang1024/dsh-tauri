@@ -17,8 +17,13 @@ npm test                                     # 拉起 dsh web，验证 303 + coo
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
 npm run verify:fast      # 离线快速门禁：语法检查 + npm 单测 + 桥接契约守卫
-cd src-tauri && cargo test && cargo build    # Rust 单测 + 构建
+npm run cargo -- test                        # Rust 单测
+npm run cargo -- build                       # Rust 构建
 ```
+
+`npm run cargo` 是 cargo 的薄包装脚本：默认把 `CARGO_TARGET_DIR` 指向工作区内的
+`src-tauri/target`，避开全局 `~/.cargo/config.toml` 里只读 target-dir 导致的失败；
+若调用方已显式设置 `CARGO_TARGET_DIR`，则尊重该设置。
 
 三项 npm 测试的分工：`npm test` 是**真运行时契约探针**（拉起真实 `dsh web` 验证 303 +
 cookie + 客户端 HTML）；`npm run test:unit` 测的是 **SHIM 注入脚本自身的行为**（纯 node 单测，
