@@ -46,6 +46,8 @@ jobs:
         run: npm run test:contract
 
       - name: Test the runtime contract
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-probe-home
         timeout-minutes: 5
         run: npm test
 

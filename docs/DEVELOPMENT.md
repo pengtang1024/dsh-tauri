@@ -44,6 +44,9 @@ CI 亦执行这三项。
 npm install --prefix runtime @deepseek-ai/dsh
 ```
 
+探针需要一个**可写**的 `DSH_HOME`（默认 `~/.dsh`）；若该目录只读，用
+`DSH_HOME=/path/to/writable npm test` 覆盖；CI 已显式设为 runner 临时目录。
+
 ## 关键实现注意点
 
 1. **服务 URL 只从 stdout 拿**：`dsh web` 打印 `dsh web: http://127.0.0.1:<port>/?token=…`；
