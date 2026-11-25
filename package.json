@@ -4,6 +4,9 @@
   "private": true,
   "description": "Tauri 2 shell for DeepSeek Harness Desktop: keeps desktop mode, live streams and native bridges without Electron.",
   "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node tools/probe-web.mjs",
     "test:unit": "node --test test/*.test.mjs",
