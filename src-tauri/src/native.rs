@@ -153,9 +153,19 @@ pub fn open_external(url: String) -> Result<(), String> {
     run("xdg-open", &[&url]).map(|_| ())
 }
 
+/// Build the `notify-send` argv for a notification.
+///
+/// The `--` terminator stops GLib/GOption from interpreting a title or body
+/// that starts with `-` (e.g. `--help`, `-u`) as an option, so page-provided
+/// text is always passed through as plain summary/body text.
+fn notify_args<'a>(title: &'a str, body: &'a str) -> Vec<&'a str> {
+    vec!["-a", "DSH", "--", title, body]
+}
+
 #[tauri::command]
 pub fn notify(title: String, body: String) -> Result<(), String> {
-    run("notify-send", &["-a", "DSH", &title, &body]).map(|_| ())
+    let args = notify_args(&title, &body);
+    run("notify-send", &args).map(|_| ())
 }
 
 #[tauri::command]
@@ -223,7 +233,7 @@ pub const SHIM: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use super::{external_url_allowed, picked_path, HelperOutcome};
+    use super::{external_url_allowed, notify_args, picked_path, HelperOutcome};
 
     #[test]
     fn allows_https() {
@@ -397,5 +407,41 @@ mod tests {
             HelperOutcome::from_code(None, None, "cmd"),
             HelperOutcome::Failed(_)
         ));
+    }
+
+    #[test]
+    fn notify_args_has_terminator_in_exact_position() {
+        let args = notify_args("title", "body");
+        assert_eq!(args.len(), 5);
+        assert_eq!(args, vec!["-a", "DSH", "--", "title", "body"]);
+    }
+
+    #[test]
+    fn notify_args_preserves_dash_prefixed_title() {
+        let title = "--help";
+        let args = notify_args(title, "body");
+        assert_eq!(args.len(), 5);
+        assert_eq!(args[3], title);
+        assert_eq!(args[4], "body");
+        // The terminator precedes the page-provided title, so it can never be
+        // re-parsed as an option by notify-send.
+        assert_eq!(args[2], "--");
+    }
+
+    #[test]
+    fn notify_args_preserves_dash_prefixed_body() {
+        let body = "-u attacker";
+        let args = notify_args("title", body);
+        assert_eq!(args.len(), 5);
+        assert_eq!(args[3], "title");
+        assert_eq!(args[4], body);
+        assert_eq!(args[2], "--");
+    }
+
+    #[test]
+    fn notify_args_preserves_empty_values() {
+        let args = notify_args("", "");
+        assert_eq!(args.len(), 5);
+        assert_eq!(args, vec!["-a", "DSH", "--", "", ""]);
     }
 }
