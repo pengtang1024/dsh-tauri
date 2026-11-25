@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node tools/probe-web.mjs",
     "test:unit": "node --test test/*.test.mjs",
+    "test:contract": "node tools/check-bridge-contract.mjs",
     "check": "node --check tools/probe-web.mjs",
     "dev": "cd src-tauri && cargo run",
     "build": "npx tauri build",

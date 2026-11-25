@@ -98,7 +98,7 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 
 ## 3. 发现的缺口与建议（只建议，本任务不改源码）
 
-1. **P0 · 目录选择以外的桌面功能基本是空桥。**目前只有 `__DSH_DIRECTORY_PICKER__.pick` 真正被上游 client 消费（第 2.2 节证据）。`dshDesktop.{updates,fileDrag,browser,fileActions,shortcuts,deviceInfo}`、`dshPlatform` 均未提供；用户会在外壳里看到「Web 版」行为（无原生更新频道、无原生拖入、无原生快捷键、analytics 策略流关闭等）。**建议**：若目标是对齐官方 Desktop 体验，按 `dshDesktop.protocolVersion = 1` 协议在 SHIM 中补一个 `globalThis.dshDesktop` 聚合对象，逐项评估哪些能力能用现有 Tauri command 实现（`open_external`/`clipboard_*`/`notify` 已具备底层）；不要改 `runtime/`。
+1. **已评估并决定不实现 · 目录选择以外的桌面功能空桥（见第 5 节）。**目前只有 `__DSH_DIRECTORY_PICKER__.pick` 真正被上游 client 消费（第 2.2 节证据）。`dshDesktop.{updates,fileDrag,browser,fileActions,shortcuts,deviceInfo}`、`dshPlatform` 均未提供；用户会在外壳里看到「Web 版」行为（无原生更新频道、无原生拖入、无原生快捷键、analytics 策略流关闭等）。**决策**：这不是待补的 P0 缺口，而是明确的「不实现」——`dshDesktop` 对象一旦存在会翻转多处行为分支（最严重是 settings-account 走 desktop 登录，而项目没有任何原生 URL-open 接线），部分子桥接的部分实现还会在插件激活期抛错或吞掉全部键盘事件。完整规格、理由与硬约束见新增第 5 节；**不要**试图补 `globalThis.dshDesktop`。
 2. **P1 · `__DSH_TAURI__` 与 `dshDesktop` 命名错位。**SHIM 的 `protocolVersion:1`、`info()`、`openExternal`、`notify`、`clipboard` 都是自己定义的一套，上游不读。这些调用本身无害（纯增强层），但会造成「已实现桌面能力」的错觉。**建议**：要么在文档/README 明确标注这部分是本项目自定义增强、不保证被上游识别；要么在后续任务把它们映射到 `dshDesktop` 相应字段（例如 `deviceInfo` 可复用 `info()` 的数据，`fileActions` 可只实现剪贴板写入）。
 3. **P1 · 原生快捷键是潜在硬报错。**`dsh-client-shortcuts/lib/client.js:2` 在 `document.documentElement.dataset.platform` 存在时要求 `window.dshDesktop.keyboard` 并抛 `Desktop keyboard bridge unavailable`。当前 SHIM 不设置 `data-platform`，正常应走 web 分支；但如果上游宿主或 HTML 模板给 root 加了 `data-platform`，这块会崩。**建议**：验证实际 serving 的页面 root 是否带 `data-platform`；若带，需要补 keyboard bridge 或去掉该属性（不在本任务实施）。
 4. **P2 · 剪贴板/外链走浏览器原生路径，SHIM 能力闲置。**主 bundle 多次使用 `navigator.clipboard.writeText`（`index-*.js:129,135`）与 React context `openExternalLink`；SHIM 的 `clipboard_write`/`open_external` 没有上游调用点。**建议**：若 Wry WebView 下 `navigator.clipboard` 权限受限，再考虑通过 `dshDesktop.fileActions` 等上游认识的通道补位；否则保持现状即可，不要重复注入。
@@ -128,3 +128,68 @@ grep -o 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' runtime/node_modules/@deepseek-ai
 ```
 
 > 说明：本次调研任务只写本文档，未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。测试是否已全绿请以 verifier 实际执行结果为准。
+
+## 5. dshDesktop v1 决策：明确不实现
+
+> 本章是精读 `runtime/node_modules/@deepseek-ai/dsh-client-*` 源码后的最终裁决，优先级高于第 2.2 节的「缺失」清单和第 3 节的历史建议。**结论：本项目不提供 `globalThis.dshDesktop`，也不提供任何子桥接的部分实现。**第 3 节第 2 条中「把能力映射到 dshDesktop 字段」的设想一并作废，不作为待办。
+
+### 5.1 核心澄清：`dshDesktop` 存在本身不会触发快捷键硬报错
+
+- 硬报错的真实门控是 `document.documentElement.dataset.platform`：`dsh-client-shortcuts/src/client/dom.ts:13-21` 仅在该属性存在时才把 runtime 设为 `'desktop'`；`dsh-client-shortcuts/src/client/index.ts:43-46` 才抛 `'Desktop keyboard bridge unavailable'`。
+- SHIM（`src-tauri/src/native.rs`）与 served `index.html` 都没有写 `data-platform`（grep writers = 0），所以当前外壳走 Web 分支，不会命中这条硬报错。
+- **绝对不要设置 `document.documentElement.dataset.platform`**，否则立即触发上述硬报错。
+
+### 5.2 但 `dshDesktop` 存在会翻转 4 处行为分支（不抛错，是行为回归）
+
+| 分支 | 证据 | 翻转后的行为 |
+| --- | --- | --- |
+| analytics policy 流开启 | `dsh-client-product-analytics/src/client/index.ts:29` | 从 Web 行为切到 Desktop 行为 |
+| welcome notice 关闭 | `dsh-client-ui-settings-models/src/client/index.ts:82,147` | 用户不再看到欢迎提示 |
+| transcript 默认 standard | `dsh-client-ui-chat/src/client/apply.ts:172` | 默认视图从 detailed 变 standard |
+| **desktop 登录** | `dsh-client-ui-settings-account/src/client/index.ts:48,229-293` | 走 RPC `startSignIn`，不再 `window.open` 弹授权页；项目当前**没有任何原生 URL-open 接线**，用户可能永远看不到授权页——**最严重风险** |
+
+### 5.3 精确规格表
+
+字段一栏均为 `dshDesktop` 的属性（除单独标注的其它 global）。「缺失行为」指不提供该字段时上游的表现；「结论」列是本项目的裁决。
+
+| 字段 | 读取表达式 | 类型 | 缺失行为 | 是否有 Rust 支撑 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| `protocolVersion` | `globalThis.dshDesktop?.protocolVersion === 1`（settings-general `src/client/index.ts:106-109`、file-drag `:32-33`、sidebar-browser `:69-72`） | 必须恰为数字 `1` | 优雅 Web 回退（调用点判空后走 Web 分支） | 现有 Rust 无法安全利用：SHIM 的 `__DSH_TAURI__.protocolVersion` 载体名不同，上游读不到 | 不实现 |
+| `updates` | settings-general `src/client/index.ts:106-121`，类型 `src/types.ts:30-35` | `{ channels?: { get(): Promise<DesktopChannelState>; set('nightly'\|'stable'): Promise<DesktopChannelChangeResult>; subscribe(cb): () => void }; status(): Promise<DesktopUpdatePresentation>; open(): Promise<void>; subscribe(cb): () => void }` | 不显示原生更新频道/状态 UI，Web 回退，优雅 | 无。构造函数 `desktop-update-source.ts:16`、`desktop-channel-source.ts:25,30` 激活期立即调 `subscribe`，部分实现 → TypeError | 绝对不碰 |
+| `fileDrag` | `globalThis.dshDesktop?.fileDrag`（file-drag `src/client/index.ts:32-39`、`transfers.ts:37-113`） | `{ prepare(source, requestId): Promise<handle \| undefined>; cancel(requestId): void; start(handle): Promise<boolean>; release(handle): void }` | blob-URL 浏览器拖放回退 | 无 | 不碰 |
+| `browser` | sidebar-browser `src/client/index.ts:69-101`，类型 `src/types.ts:20-27` | `{ acquire(workspace): Promise<{ lease, partition }>; release(lease): Promise<void>; onOpenRequested(lease, cb): () => void }` | 回退 iframe | 无。Tauri 源码零 `.emit`/`.listen`，无法向页面推送事件 | 不碰 |
+| `fileActions` | file-actions `src/client/index.ts:25-28`，类型 `src/types.ts:15-27` | `{ save({ url, name?, mediaType?, mode: 'download'\|'saveAs' }): Promise<{ status: 'cancelled'\|'requested'\|'saved'; path?: string }>; readClipboardImage(url): Promise<{ bytes: Uint8Array; mediaType: string }> }` | `canSaveAs = false`；`saveAs` 抛 `'Save as requires Desktop'`（`files.ts:52`） | 无 save-image 命令；`clipboard_write` 仅文本。部分实现翻 `canSaveAs = true` 后产生可见失败 | 不碰 |
+| `shortcuts` / `keyboard` | `window.dshDesktop?.keyboard`（shortcuts `src/client/index.ts:45`）、`window.dshDesktop?.shortcuts`（`storage.ts:39`） | Keyboard `{ subscribe(cb(input): void): () => void; closeWindow(revision): Promise<void> }`（`src/native.ts:20-29`）；Shortcuts `{ get(defs): Promise<snapshot>; edit(edit, revision): Promise<result>; subscribe(cb): () => void; recording(bool): Promise<void> }`（`src/persistence.ts:33-38`） | Web 键盘派发路径，优雅 | 无。关键：`dom.ts:91` 的 `if (native) return` 意味着空 `subscribe` 会吞掉全部键盘派发 | 绝对不碰 |
+| `deviceInfo` | `globalThis.dshDesktop?.deviceInfo`（settings-account `src/client/index.ts:198-200`） | `() => Promise<string>` | `navigator.userAgent` 回退（`:201-204`），异常被吞掉（`:206-213`） | 唯一可用现有 `shell_info` 支撑的字段 | 因 `dshDesktop` 整体不实现，本次也不加 |
+| `dshPlatform` | settings-account `:157`、`PlatformOverlay.tsx:10-17` | `{ open(page: 'usage'\|'top-up', bounds): Promise<void>; setBounds(bounds): Promise<void>; close(): Promise<void> }` | 功能缺席，优雅 | 无；需要原生内嵌视图 | 不碰 |
+
+### 5.4 其它全局速览
+
+| global | 证据 | 风险 | 结论 |
+| --- | --- | --- | --- |
+| `__DSH_SHORTCUTS_CONFIG__` | shortcuts `index.ts:51`、`config.ts:5-13`，`{ stopSequenceMs: number }`，默认 500 | 相对安全 | 本任务不改 |
+| `__DSH_LOCALE__` | locale `src/client/index.ts:568` | 会让 `apply()` 变 async，数据坏时硬抛 TypeError（`bootstrap.ts:24-31`） | 不碰 |
+| `__DSH_HOST_PATHS__` | conversation `apply.ts:113-115,504-521`，`pathFor(file): string` | 无法从浏览器 `File` 实现 | 不碰 |
+| `__DSH_FILE_UPLOAD__` | file-upload `runtime.ts:170`，`{ fetch }` | 非必需，worker 回退够用 | 不碰 |
+| `__DSH_DOCUMENT_PREVIEW_CONFIG__` | documentpreview `index.ts:90` | 有完整默认值（`config.ts:29-41`），无害 | 不碰 |
+
+### 5.5 决策与硬约束
+
+**决策：明确不提供 `dshDesktop`。**没有任何子桥接的部分实现是安全的——要么在插件激活期抛错（`updates`），要么吞掉全部键盘派发（`shortcuts`/`keyboard`），要么翻转登录路径导致授权页不可达（`settings-account`）。
+
+硬约束清单：
+
+1. **绝不设置 `document.documentElement.dataset.platform`**——会触发 `'Desktop keyboard bridge unavailable'` 硬报错（见 5.1）。
+2. **绝不部分实现子桥接**——`updates` / `fileDrag` / `browser` / `fileActions` / `shortcuts` / `keyboard` / `deviceInfo` / `dshPlatform` 任何一项都不加；半套实现比完全缺失更危险。
+3. 不碰 `__DSH_LOCALE__`、`__DSH_HOST_PATHS__` 等高风险全局；不为对齐 Desktop 改动 `runtime/`、源码、`package.json`、`tools/`。
+4. 维持现状：只保留已覆盖的 `__DSH_DIRECTORY_PICKER__` 与 shell 增强全局，其余走上游自带的 Web 回退路径。
+
+### 5.6 未来若要对齐 Desktop 的前置条件
+
+按当前 `src-tauri/src` 源码**没有任何 `.emit`/`.listen`** 的事实，以下缺一不可；在它们全部落地前，维持「不实现」是唯一安全选择：
+
+1. **原生事件推送通道**（Rust → WebView）：`updates.status`/`updates.channels`、`browser.onOpenRequested`、`shortcuts.subscribe`、`keyboard.subscribe` 等所有 `subscribe` 回调都依赖它。
+2. **原生 URL-open 接线**：支撑 `settings-account` 的 desktop 登录（`startSignIn`）授权页；现有 `open_external` 只是 SHIM 自用全局，没有接到登录流程。
+3. **原生快捷键订阅**：含录制（`recording`）、持久化（`get`/`edit`）与 `closeWindow`，并保证 `subscribe` 不吞事件。
+4. **原生保存 / 拖入 / 浏览器视图命令**：`fileActions.save`、`readClipboardImage`、`fileDrag` 四方法、`browser.acquire`/`release`。
+5. **原生更新频道/状态实现与内嵌平台视图**：`updates` 全套与 `dshPlatform.open`/`setBounds`/`close`。
