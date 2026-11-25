@@ -71,3 +71,11 @@ test('probe echoes runtime stderr tail when the runtime exits before printing it
   assert.equal(result.code, 1, `stderr: ${result.stderr}`);
   assert.match(result.stderr, /FAKE_STDERR_MARKER_42/);
 });
+
+test('probe exits 2 with a clear error when a flag has no value', async () => {
+  const result = await runProbe(['--runtime']);
+  assert.equal(result.code, 2, `stderr: ${result.stderr}`);
+  assert.match(result.stderr, /--runtime/);
+  assert.match(result.stderr, /需要一个值/);
+  assert.doesNotMatch(result.stderr, /TypeError|ERR_INVALID_ARG_TYPE|node:path|\n\s+at /);
+});

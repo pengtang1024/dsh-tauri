@@ -19,7 +19,13 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const flag = (name, fallback) => {
   const index = process.argv.indexOf(`--${name}`);
-  return index === -1 ? fallback : process.argv[index + 1];
+  if (index === -1) return fallback;
+  const value = process.argv[index + 1];
+  if (value === undefined || value.startsWith('--')) {
+    console.error(`--${name} 需要一个值`);
+    process.exit(2);
+  }
+  return value;
 };
 const runtime = flag('runtime', process.env.DSH_TAURI_RUNTIME ?? join(root, 'runtime'));
 const entry = join(runtime, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
