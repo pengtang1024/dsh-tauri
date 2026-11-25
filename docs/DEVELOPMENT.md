@@ -39,7 +39,9 @@ CI 亦执行这三项。
 另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `check:docs` + `check:versions`
 + `test:unit` + `test:contract` 五层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、
 `docs/DESKTOP_BRIDGE.zh.md`）里硬编码的 Rust 单测数与 `src-tauri/src/**/*.rs` 的实际
-`#[test]` 数量一致，漂移即 FAIL；`check:versions` 以 package.json 为基准核对
+`#[test]` 数量一致，漂移即 FAIL；`check:docs` 还校验 `tools/check-bridge-contract.mjs`
+里 `GUARD_CHECK_COUNT` 声明的契约守卫检查项数与 CHANGELOG.md 中「契约漂移守卫…静态检查」
+的项数一致（只读源码正则比对，不运行守卫），漂移即 FAIL；`check:versions` 以 package.json 为基准核对
 `src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` `[package]` 的版本号，漂移即 FAIL，
 已包含在 `verify:fast` 内；全程离线、不需要真运行时，runtime 缺失时
 `test:contract` 会自动 SKIP；但真正的

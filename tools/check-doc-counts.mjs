@@ -4,10 +4,13 @@
  * Rust unit tests (#[test] attributes under src-tauri/src, recursively) and
  * npm unit tests (node:test test() calls in .test.mjs files under test/,
  * recursively, strict line-start match so helpers/comments are not counted).
+ * It also checks the bridge contract guard's check count (the GUARD_CHECK_COUNT
+ * constant in tools/check-bridge-contract.mjs) against the count documented in
+ * CHANGELOG.md, without running the guard (which scans thousands of files).
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
  * Prints one PASS/FAIL per check with file:line and expected/actual, then
- * "SUMMARY: 4 checks, M FAILS". Exits 1 when any check fails, else 0.
+ * "SUMMARY: 5 checks, M FAILS". Exits 1 when any check fails, else 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -39,11 +42,21 @@ for (const file of sourceFiles(join(root, 'test'), '.test.mjs')) {
   for (const line of text.split(/\r?\n/)) if (npmTestLine.test(line)) npmTestCount++;
 }
 
+const guardPath = 'tools/check-bridge-contract.mjs';
+let guardCount = null;
+let guardLine = '?';
+const guardText = readFileSync(join(root, guardPath), 'utf8');
+for (const [i, line] of guardText.split(/\r?\n/).entries()) {
+  const m = line.match(/GUARD_CHECK_COUNT\s*=\s*(\d+)/);
+  if (m) { guardCount = Number(m[1]); guardLine = i + 1; break; }
+}
+
 const checks = [
   { name: 'README.md', file: 'README.md', pattern: /Rust 单测 (\d+) 项/, expected: rustTestCount },
   { name: 'CHANGELOG.md', file: 'CHANGELOG.md', pattern: /从 17 个增至 (\d+) 个/, expected: rustTestCount },
   { name: 'DESKTOP_BRIDGE.zh.md', file: 'docs/DESKTOP_BRIDGE.zh.md', pattern: /cargo test`?\s+(\d+) passed/, expected: rustTestCount },
   { name: 'README.md npm 单测', file: 'README.md', pattern: /注入脚本、CLI、错误页与启动页单测，(\d+) 项/, expected: npmTestCount },
+  { name: 'CHANGELOG.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'CHANGELOG.md', pattern: /契约漂移守卫.*?静态检查（(\d+) 项/, expected: guardCount },
 ];
 
 const FAILS = [];

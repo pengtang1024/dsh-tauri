@@ -18,6 +18,10 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Number of checks reported in SUMMARY. When adding/removing a check below,
+// update this constant and the count in CHANGELOG.md ("契约漂移守卫") together.
+export const GUARD_CHECK_COUNT = 13;
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeRoot = join(root, 'runtime', 'node_modules', '@deepseek-ai');
 const exts = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.map', '.html']);
@@ -292,6 +296,6 @@ for (const { dir, suffixes } of desktopRoots) {
 }
 if (desktopHits === 0) emit('PASS', 'dshDesktop global not injected (documented decision)', desktopRoots.map((entry) => rel(entry.dir)).join(', '));
 
-const checks = 1 + allowed.length + unexpected.length + 1 + 1 + 1 + 1;
+const checks = GUARD_CHECK_COUNT;
 console.log(`SUMMARY: ${checks} checks, ${FAILS.length} FAIL${FAILS.length === 1 ? '' : 'S'} (${files.length} runtime source files scanned)`);
 process.exit(FAILS.length === 0 ? 0 : 1);
