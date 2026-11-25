@@ -56,7 +56,7 @@ fn version_probe_error(status_text: &str, stderr_tail: &str, timed_out: bool, np
 
 fn npm_missing() -> String {
     format!(
-        "找不到可用的 npm：外壳需要用 npm 安装 {PACKAGE}。\n\n请先安装 Node.js 24+ 与 npm，例如：\n  sudo apt install nodejs npm\n\n已安装但不在 PATH 时，用 DSH_TAURI_NPM=/path/to/npm 指定。"
+        "找不到可用的 npm：外壳需要用 npm 安装 {PACKAGE}。\n\n请安装 Node.js 24+（发行版包管理器可能版本过旧，建议从 https://nodejs.org/ 或 nvm 获取），npm 随 Node 一起安装。\n\n已安装但不在 PATH 时，用 DSH_TAURI_NPM=/path/to/npm 指定。"
     )
 }
 
@@ -174,7 +174,9 @@ mod tests {
         let message = npm_missing();
         assert!(message.contains("npm"));
         assert!(message.contains("24+"));
+        assert!(message.contains("nodejs.org"));
         assert!(message.contains("DSH_TAURI_NPM"));
+        assert!(!message.contains("sudo apt"), "must not suggest an apt command that cannot install Node 24+");
     }
 
     #[test]
