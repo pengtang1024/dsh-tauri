@@ -30,6 +30,20 @@ fn home_dir() -> PathBuf {
     std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"))
 }
 
+/// Whether `host` is a loopback address the shell's WebView may open.
+///
+/// Mirrors `banner::web_url`: strip surrounding brackets from IPv6 literals,
+/// lowercase, then compare against the same loopback set. Whitespace is
+/// trimmed so a copied/pasted value with padding is still accepted.
+fn is_loopback_host(host: &str) -> bool {
+    let normalized = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    matches!(normalized.as_str(), "127.0.0.1" | "localhost" | "::1")
+}
+
 impl Config {
     /// Locate the runtime this app should drive, installing it on a first launch.
     pub fn resolve(app: Option<&AppHandle>) -> Result<Self, String> {
@@ -44,6 +58,12 @@ impl Config {
         }
 
         let node = env_path("DSH_TAURI_NODE").unwrap_or_else(|| PathBuf::from("node"));
+        let host = std::env::var("DSH_TAURI_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
+        if !is_loopback_host(&host) {
+            return Err(format!(
+                "DSH_TAURI_HOST={host} 不是 loopback 地址；外壳只能打开 127.0.0.1 / localhost / ::1 上的服务。请去掉该变量或设为 127.0.0.1。"
+            ));
+        }
         Ok(Self {
             node,
             runtime,
@@ -51,7 +71,7 @@ impl Config {
             entry,
             home: env_path("DSH_HOME").unwrap_or_else(|| home_dir().join(".dsh")),
             profile: std::env::var("DSH_TAURI_PROFILE").unwrap_or_else(|_| "web".to_owned()),
-            host: std::env::var("DSH_TAURI_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned())
+            host
         })
     }
 }
@@ -109,9 +129,40 @@ pub fn info(app: &AppHandle) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::info_into;
+    use super::{info_into, is_loopback_host};
     use serde_json::Value;
     use std::path::Path;
+
+    #[test]
+    fn loopback_hosts_are_accepted() {
+        for host in [
+            "127.0.0.1",
+            "localhost",
+            "LOCALHOST",
+            "::1",
+            "[::1]",
+            "  127.0.0.1  ",
+            "\tlocalhost\n",
+            " [::1] ",
+        ] {
+            assert!(is_loopback_host(host), "expected {host:?} to be loopback");
+        }
+    }
+
+    #[test]
+    fn non_loopback_hosts_are_rejected() {
+        for host in [
+            "0.0.0.0",
+            "192.168.1.5",
+            "example.com",
+            "",
+            "   ",
+            "127.0.0.2",
+            "[::2]",
+        ] {
+            assert!(!is_loopback_host(host), "expected {host:?} to be non-loopback");
+        }
+    }
 
     #[test]
     fn info_into_all_some_has_exact_fields_and_runtime_entry() {
