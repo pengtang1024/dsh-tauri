@@ -33,6 +33,9 @@ jobs:
       - name: Check helper script syntax
         run: npm run check
 
+      - name: Check documented test counts
+        run: npm run check:docs
+
       - name: Install the Tauri CLI
         run: npm ci
 
