@@ -68,23 +68,28 @@ fn check(dir: &Path, source: Source) -> Result<(), String> {
     Ok(())
 }
 
-/// Find the first semver-looking token in the output of `npm view ... version`.
+/// Find the last semver-looking token in the output of `npm view ... version`.
 ///
-/// Scans lines top-to-bottom and, within each line, tokens left-to-right; the
-/// first token that fully satisfies the version grammar wins. A token must be
+/// Scans lines top-to-bottom and, within each line, tokens left-to-right, but
+/// keeps updating the match so the **last** token that fully satisfies the
+/// version grammar wins: `npm view <pkg> version` prints its actual answer on
+/// the last stdout line, while any `npm notice` line carrying a stray version
+/// (for example an upgrade notice) comes before it. Taking the last valid token
+/// therefore lands on the real result instead of the notice. A token must be
 /// the whole version (optional `v`/`V` prefix, `major.minor.patch`, optional
 /// `-prerelease` and `+build`), so error codes, URLs and ISO timestamps never
 /// qualify. The leading `v` is stripped from the returned string.
 fn parse_upstream_version(output: &str) -> Option<String> {
+    let mut found: Option<String> = None;
     for line in output.lines() {
         for token in line.split_whitespace() {
             let token = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '\'' | '"' | '(' | ')' | '[' | ']'));
             if let Some(version) = parse_version_token(token) {
-                return Some(version);
+                found = Some(version);
             }
         }
     }
-    None
+    found
 }
 
 /// Validate one whitespace-delimited token as a version and normalize it.
@@ -141,8 +146,10 @@ fn scan_identifiers(bytes: &[u8], mut i: usize) -> Option<usize> {
 }
 
 /// `npm view @deepseek-ai/dsh version` honours the user's npm config (mirrors).
+/// `--loglevel=error` suppresses user-configured notice output at the source,
+/// matching the install path in install.rs; the 90s timeout is unchanged.
 fn upstream_version() -> Result<String, String> {
-    let outcome = exec::run(&install::npm(), &["view", PACKAGE, "version"], VIEW_TIMEOUT)?;
+    let outcome = exec::run(&install::npm(), &["view", "--loglevel=error", PACKAGE, "version"], VIEW_TIMEOUT)?;
     if !outcome.ok() {
         return Err(format!("`npm view {PACKAGE} version` 失败（{}）：{}", outcome.status, outcome.tail(4)));
     }
@@ -204,14 +211,25 @@ mod tests {
     }
 
     #[test]
-    fn takes_first_of_multiple_versions() {
-        // Deliberate choice: scan lines top-to-bottom, tokens left-to-right and
-        // return the very first valid version. npm prints one version on stdout;
-        // if a warning line happens to contain a version too, the earliest
-        // occurrence is the least surprising and deterministic answer.
+    fn takes_last_of_multiple_versions() {
+        // npm view prints its answer on the last stdout line; any notice that
+        // happens to contain a version comes earlier, so the last valid token
+        // is the deterministic choice.
         let output = "npm notice v9.9.9\n1.0.0\n2.0.0\n";
-        assert_eq!(parse_upstream_version(output), Some("9.9.9".to_owned()));
-        assert_eq!(parse_upstream_version("1.0.0 2.0.0"), Some("1.0.0".to_owned()));
+        assert_eq!(parse_upstream_version(output), Some("2.0.0".to_owned()));
+        assert_eq!(parse_upstream_version("1.0.0 2.0.0"), Some("2.0.0".to_owned()));
+    }
+
+    #[test]
+    fn ignores_fake_version_in_earlier_notice() {
+        let output = "npm notice update available 9.9.9\nnpm notice config registry=https://registry.npmjs.org/\n0.4.1\n";
+        assert_eq!(parse_upstream_version(output), Some("0.4.1".to_owned()));
+    }
+
+    #[test]
+    fn prefers_real_result_after_notice() {
+        let output = "\n\nnpm notice new minor version available\nnpm notice update available 9.9.9\n  0.4.1  \nnpm notice done in 1.2s\n";
+        assert_eq!(parse_upstream_version(output), Some("0.4.1".to_owned()));
     }
 
     #[test]
