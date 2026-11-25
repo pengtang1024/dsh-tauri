@@ -16,12 +16,28 @@ use tauri::{AppHandle, Manager};
 /// Maximum number of stale-socket takeovers before we give up and fail open.
 const MAX_TAKEOVER_ATTEMPTS: u8 = 3;
 
-/// Address of the primary instance, under the per-user runtime directory.
+/// Socket file name used when falling back to the shared temp directory.
+///
+/// The temp directory is shared between users, so the uid keeps one user's
+/// instance from taking over another user's socket.
+fn fallback_socket_name(uid: u32) -> String {
+    format!("dsh-tauri-{uid}.sock")
+}
+
+/// Address of the primary instance.
+///
+/// XDG_RUNTIME_DIR is already per-user, so the stable name is safe there. Only
+/// when it is missing or empty do we fall back to the shared temp directory,
+/// where the socket name must carry the uid instead.
 fn socket_path() -> PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir());
-    dir.join("dsh-tauri.sock")
+    match std::env::var("XDG_RUNTIME_DIR") {
+        Ok(dir) if !dir.is_empty() => PathBuf::from(dir).join("dsh-tauri.sock"),
+        _ => {
+            // SAFETY: getuid() has no preconditions and cannot fail.
+            let uid = unsafe { libc::getuid() } as u32;
+            std::env::temp_dir().join(fallback_socket_name(uid))
+        }
+    }
 }
 
 /// True only when `path` itself is a Unix socket.
@@ -164,6 +180,16 @@ mod tests {
     #[test]
     fn focus_label_main_missing_returns_splash() {
         assert_eq!(focus_label(false), "splash");
+    }
+
+    #[test]
+    fn fallback_socket_name_includes_uid() {
+        assert_eq!(fallback_socket_name(1000), "dsh-tauri-1000.sock");
+    }
+
+    #[test]
+    fn fallback_socket_name_zero_uid() {
+        assert_eq!(fallback_socket_name(0), "dsh-tauri-0.sock");
     }
 
     #[test]
