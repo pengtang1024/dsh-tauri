@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Read-only guard: the hard-coded Rust unit-test counts in three docs must
- * match the real number of #[test] attributes in the Rust sources under
- * src-tauri/src (recursively, all .rs files).
+ * Read-only guard: hard-coded test counts in docs must match the real sources:
+ * Rust unit tests (#[test] attributes under src-tauri/src, recursively) and
+ * npm unit tests (node:test test() calls in .test.mjs files under test/,
+ * recursively, strict line-start match so helpers/comments are not counted).
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
- * Prints one PASS/FAIL per doc with file:line and expected/actual, then
- * "SUMMARY: 3 checks, M FAILS". Exits 1 when any check fails, else 0.
+ * Prints one PASS/FAIL per check with file:line and expected/actual, then
+ * "SUMMARY: 4 checks, M FAILS". Exits 1 when any check fails, else 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -14,27 +15,35 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-function* rustSources(dir) {
+function* sourceFiles(dir, suffix) {
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const entry of entries) {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) { yield* rustSources(path); continue; }
-    if (entry.isFile() && entry.name.endsWith('.rs')) yield path;
+    if (entry.isDirectory()) { yield* sourceFiles(path, suffix); continue; }
+    if (entry.isFile() && entry.name.endsWith(suffix)) yield path;
   }
 }
 
-const testLine = /^\s*#\[test\]/;
+const rustTestLine = /^\s*#\[test\]/;
 let rustTestCount = 0;
-for (const file of rustSources(join(root, 'src-tauri', 'src'))) {
+for (const file of sourceFiles(join(root, 'src-tauri', 'src'), '.rs')) {
   const text = readFileSync(file, 'utf8');
-  for (const line of text.split(/\r?\n/)) if (testLine.test(line)) rustTestCount++;
+  for (const line of text.split(/\r?\n/)) if (rustTestLine.test(line)) rustTestCount++;
+}
+
+const npmTestLine = /^\s*test\s*\(/;
+let npmTestCount = 0;
+for (const file of sourceFiles(join(root, 'test'), '.test.mjs')) {
+  const text = readFileSync(file, 'utf8');
+  for (const line of text.split(/\r?\n/)) if (npmTestLine.test(line)) npmTestCount++;
 }
 
 const checks = [
-  { name: 'README.md', file: 'README.md', pattern: /Rust 单测 (\d+) 项/ },
-  { name: 'CHANGELOG.md', file: 'CHANGELOG.md', pattern: /从 17 个增至 (\d+) 个/ },
-  { name: 'DESKTOP_BRIDGE.zh.md', file: 'docs/DESKTOP_BRIDGE.zh.md', pattern: /cargo test`?\s+(\d+) passed/ },
+  { name: 'README.md', file: 'README.md', pattern: /Rust 单测 (\d+) 项/, expected: rustTestCount },
+  { name: 'CHANGELOG.md', file: 'CHANGELOG.md', pattern: /从 17 个增至 (\d+) 个/, expected: rustTestCount },
+  { name: 'DESKTOP_BRIDGE.zh.md', file: 'docs/DESKTOP_BRIDGE.zh.md', pattern: /cargo test`?\s+(\d+) passed/, expected: rustTestCount },
+  { name: 'README.md npm 单测', file: 'README.md', pattern: /注入脚本、CLI、错误页与启动页单测，(\d+) 项/, expected: npmTestCount },
 ];
 
 const FAILS = [];
@@ -53,17 +62,17 @@ for (const check of checks) {
   }
 
   const where = found ? check.file + ':' + found.line : check.file + ':?';
-  if (found && Number(found.value) === rustTestCount) {
-    console.log('PASS ' + check.name + ' — ' + where + ' — 期望 ' + rustTestCount + ' / 实际 ' + found.value);
+  if (found && Number(found.value) === check.expected) {
+    console.log('PASS ' + check.name + ' — ' + where + ' — 期望 ' + check.expected + ' / 实际 ' + found.value);
   } else {
     const actual = found ? found.value : 'PATTERN NOT FOUND';
-    console.log('FAIL ' + check.name + ' — ' + where + ' — 期望 ' + rustTestCount + ' / 实际 ' + actual);
+    console.log('FAIL ' + check.name + ' — ' + where + ' — 期望 ' + check.expected + ' / 实际 ' + actual);
     FAILS.push(check.name);
   }
 }
 
 console.log('SUMMARY: ' + checks.length + ' checks, ' + FAILS.length + ' FAILS');
 if (FAILS.length > 0) {
-  console.error('文档测试数量与 Rust 源码不一致（' + FAILS.join('、') + '）：请同步文档中的测试数量或修正统计（src-tauri/src/**/*.rs 实际 #[test] = ' + rustTestCount + '）。');
+  console.error('文档测试数量与源码不一致（' + FAILS.join('、') + '）：请同步文档中的测试数量或修正统计（src-tauri/src/**/*.rs 实际 #[test] = ' + rustTestCount + '；test/**/*.test.mjs 实际 test() = ' + npmTestCount + '）。');
   process.exit(1);
 }
