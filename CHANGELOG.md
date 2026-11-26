@@ -106,6 +106,7 @@
 - **验证口径同步七层改八层**：README 与开发手册的离线验证说明同步为八层（新增命令注册守卫），CI 探针描述与实际 workflow 对齐
 - **环境变量表补 loopback 约束**：README 与七语言详情页共 8 处的 `DSH_TAURI_URL` 说明同步为仅 http(s)+loopback（127.0.0.1 / localhost / [::1]），不再让人误以为可指向外部服务
 - **环境变量表补齐覆盖项**：README 与七语言详情页的变量表补上 `DSH_TAURI_HOST`（loopback 绑定主机）与 `DSH_TAURI_NPM`（npm 路径覆盖），与源码实际读取项一致
+- **deb 托盘依赖**：deb 的 depends 补上 `libayatana-appindicator3-1`，Tauri 的 depends 是覆盖语义、托盘 dlopen 的库需显式声明，避免干净系统安装后托盘静默不可用
 
 ## 0.4.1
 
