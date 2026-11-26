@@ -48,8 +48,16 @@ fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).map(PathBuf::from).filter(|path| !path.as_os_str().is_empty())
 }
 
+/// Match an environment flag case-insensitively, ignoring surrounding whitespace.
+///
+/// `accepted` entries are expected to be lowercase. An empty value never matches.
+fn env_flag_matches(value: &str, accepted: &[&str]) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    !value.is_empty() && accepted.contains(&value.as_str())
+}
+
 fn env_is(name: &str, values: &[&str]) -> bool {
-    values.contains(&std::env::var(name).unwrap_or_default().trim())
+    env_flag_matches(&std::env::var(name).unwrap_or_default(), values)
 }
 
 /// `DSH_TAURI_OFFLINE=1` disables every network operation (install and check).
@@ -211,6 +219,16 @@ mod tests {
             std::fs::create_dir_all(parent).expect("create parent dir");
         }
         std::fs::write(path, contents).expect("write file");
+    }
+
+    #[test]
+    fn env_flag_matches_trims_and_lowercases_true() {
+        assert!(env_flag_matches(" TRUE ", &["1", "true", "yes", "on"]));
+    }
+
+    #[test]
+    fn env_flag_matches_does_not_confuse_off_with_on() {
+        assert!(!env_flag_matches("Off", &["1", "true", "yes", "on"]));
     }
 
     #[test]
