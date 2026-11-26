@@ -3,19 +3,20 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
-/// Native "star this project" entry. The window menu owns it; the tray menu
-/// deliberately has its own show/quit actions only, so the entry is not
-/// duplicated in two places. Both handlers call `native::open_external`
-/// directly: it is a plain Rust call, so it works even before any window exists
-/// and needs no extra capability.
+/// Native menu ids/labels. The window menu owns the star entry; the tray menu
+/// deliberately has its own show/quit actions only, so it is not duplicated.
+/// Both menu handlers call plain Rust helpers, so they work before any window
+/// exists and need no extra frontend capability.
 const SUPPORT_ID: &str = "support";
-const HELP_MENU_LABEL: &str = "帮助";
+const ABOUT_ID: &str = "about";
+const DSH_MENU_LABEL: &str = "DSH";
 const SUPPORT_ITEM_LABEL: &str = "支持项目 ⭐";
 const SUPPORT_URL: &str = "https://github.com/pengtang1024/dsh-tauri";
 
@@ -115,39 +116,74 @@ fn close_to_tray() -> bool {
     value.get("closeToTray").and_then(serde_json::Value::as_bool).unwrap_or(true)
 }
 
-/// Window menu: three columns (Edit / View / Help). Editing items are
-/// predefined so the WebView keeps its native clipboard and undo behaviour;
-/// View items carry no hand-written accelerators — a GTK menubar full of
-/// shortcut hints reads like a cheat sheet rather than a menu. There is
-/// deliberately no Window column: the GTK title bar already provides
-/// minimize/close buttons. The devtools item is always visible and always
-/// works: the `devtools` Cargo feature (see Cargo.toml) gates the Tauri API in
-/// release builds, so no debug-only cfg and no disabled menu state is needed.
+/// Single-column native menu, designed around this project's workflow rather
+/// than a generic desktop template. dsh-tauri is a launcher/diagnostic shell:
+/// the real session lives in the WebView, so the native menu exposes only what
+/// the WebView cannot do for itself and the OS does not already provide.
+///
+/// - 重新加载: the main window uses WebviewUrl::External and has no browser
+///   refresh button; reload after a service restart or a background update.
+/// - 开发者工具: WebKitGTK diagnostics for the web UI and the bridge. Always
+///   visible and enabled — the `devtools` Cargo feature makes the API available
+///   in release too, so no debug-only cfg, no env gate, no disabled state.
+/// - 关于 dsh-tauri: shows this shell's own shell_info (runtime / home /
+///   profile / desktopVersion), answering "which runtime am I running".
+/// - 支持项目 ⭐ lives inside the about submenu, not as a top-level column and
+///   not in the tray.
+///
+/// No Edit column (the upstream web UI owns its own clipboard/undo and Linux
+/// undo/redo is not native here), no View/Window column or fullscreen (GTK F11
+/// and the title bar already cover those).
 pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let edit = Submenu::with_items(
-        app,
-        "编辑",
-        true,
-        &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, None)?,
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?
-        ]
-    )?;
-
     let reload = MenuItem::with_id(app, "reload", "重新加载", true, None::<&str>)?;
-    let fullscreen = MenuItem::with_id(app, "fullscreen", "全屏", true, None::<&str>)?;
     let devtools = MenuItem::with_id(app, "devtools", "开发者工具", true, None::<&str>)?;
-    let view = Submenu::with_items(app, "查看", true, &[&reload, &fullscreen, &devtools])?;
-
+    let about = MenuItem::with_id(app, ABOUT_ID, "关于 dsh-tauri", true, None::<&str>)?;
     let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
-    let help = Submenu::with_items(app, HELP_MENU_LABEL, true, &[&support])?;
+    // The star sits inside the about cluster, never as a top-level column.
+    let about_cluster = Submenu::with_items(app, "关于", true, &[&about, &support])?;
+    // Exactly one top-level column: everything the shell owns lives under DSH.
+    let dsh = Submenu::with_items(app, DSH_MENU_LABEL, true, &[&reload, &devtools, &about_cluster])?;
 
-    Menu::with_items(app, &[&edit, &view, &help])
+    Menu::with_items(app, &[&dsh])
+}
+
+/// Build the about-panel text from the same shell_info the bridge exposes.
+/// Pure so the exact fields and fallback wording can be tested without a window.
+fn about_text(info: &serde_json::Value) -> String {
+    let field = |key: &str| -> String {
+        match info.get(key).and_then(serde_json::Value::as_str) {
+            Some(value) if !value.is_empty() => value.to_owned(),
+            _ => "未设置".to_owned(),
+        }
+    };
+    format!(
+        "DSH Tauri {version}\n运行时: {runtime}\n主目录: {home}\n配置: {profile}\n桌面版本: {version}",
+        version = field("desktopVersion"),
+        runtime = field("runtime"),
+        home = field("home"),
+        profile = field("profile")
+    )
+}
+
+/// Show shell_info in a lightweight native about panel. Tauri 2.12.7 itself has
+/// no dialog API (that lives in the optional tauri-plugin-dialog crate, which is
+/// not a dependency here and must not be added under this task's 0-invasion
+/// constraint). Use the system's `zenity --info` helper — already present for
+/// the folder picker in native.rs — with --no-markup so user-controlled paths
+/// are never parsed as Pango markup. No external URL, no capability, no new
+/// dependency; failures are logged and never block the menu.
+fn show_about(app: &AppHandle<Wry>) {
+    let info = crate::dsh::info(app);
+    let text = about_text(&info);
+    // spawn, not output(): menu events run on Tauri's main thread, so waiting
+    // for the dialog to close would freeze the DSH window. zenity owns its own
+    // GTK loop; stderr is inherited so dialog errors stay visible in logs.
+    if let Err(error) = Command::new("zenity")
+        .args(["--info", "--title", "关于 dsh-tauri", "--no-markup", "--text", &text])
+        .spawn()
+    {
+        eprintln!("[dsh-tauri] 无法打开关于面板：{error}");
+    }
 }
 
 /// Which window owns the shared menu: the real UI once it exists, otherwise the
@@ -156,12 +192,22 @@ fn menu_window_label(main_exists: bool) -> &'static str {
     if main_exists { "main" } else { "splash" }
 }
 
-/// Wire menu actions; unknown ids are ignored so predefined items keep working.
+/// Wire menu actions; unknown ids are ignored. Reload/devtools target the
+/// owning window (main once it exists, otherwise the boot splash); about and
+/// support are plain Rust helpers that work even before a window exists.
 pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
     if id == SUPPORT_ID {
         if let Err(error) = crate::native::open_external(SUPPORT_URL.to_owned()) {
             eprintln!("[dsh-tauri] cannot open the support page: {error}");
         }
+        return;
+    }
+    if id == ABOUT_ID {
+        show_about(app);
+        return;
+    }
+    // Remaining known ids are window actions; unknown ids are ignored.
+    if id != "reload" && id != "devtools" {
         return;
     }
     let label = menu_window_label(app.get_webview_window("main").is_some());
@@ -170,16 +216,11 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
         "reload" => {
             // The main window is created at WebviewUrl::External(url); injecting
             // `window.location.reload()` via eval is not reliable on an external
-            // origin. Tauri 2.12.7 exposes WebviewWindow::reload(), which reloads
-            // the current document through the native WebView on any URL and
-            // re-runs the SHIM initialization script. Log a failure instead of
-            // silently doing nothing.
+            // origin. WebviewWindow::reload() reloads any URL through the native
+            // WebView and re-runs the SHIM; log failures instead of swallowing.
             if let Err(error) = window.reload() {
                 eprintln!("[dsh-tauri] 无法重新加载窗口：{error}");
             }
-        }
-        "fullscreen" => {
-            let _ = window.set_fullscreen(!window.is_fullscreen().unwrap_or(false));
         }
         "devtools" => {
             // Always shown, always functional in release builds too: the
@@ -190,8 +231,9 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
     }
 }
 
-/// Tray icon: left click restores the window, the menu offers show/quit.
-/// The star entry lives only in the window Help menu (no duplicate here).
+/// Tray icon: left click restores the window, the menu offers show/quit only.
+/// Session-keepalive lifecycle stays here; the star entry lives only in the
+/// window's about cluster (no duplicate here).
 pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -433,7 +475,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, resized_event_is_noop, urlencoding, WindowState, HELP_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
+    use super::{about_text, clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, resized_event_is_noop, urlencoding, WindowState, ABOUT_ID, DSH_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -457,47 +499,81 @@ mod tests {
         tail[..end].to_owned()
     }
 
-    #[test]
-    fn window_menu_has_exactly_three_columns() {
-        let menu = build_menu_source();
-        let top = menu
-            .split("Menu::with_items(app, &[")
+    /// The top-level menu row, i.e. the text inside Menu::with_items.
+    fn top_as_binding(menu: &str) -> &str {
+        menu.split("Menu::with_items(app, &[")
             .nth(1)
             .and_then(|tail| tail.split("])").next())
-            .expect("top-level Menu::with_items must exist");
-        assert_eq!(top.matches("&edit").count(), 1, "Edit column must appear once");
-        assert_eq!(top.matches("&view").count(), 1, "View column must appear once");
-        assert_eq!(top.matches("&help").count(), 1, "Help column must appear once");
-        assert!(!top.contains("&window"), "Window column must be removed");
-        assert!(!top.contains("&tray"), "tray must not be in the window menu");
+            .expect("top-level Menu::with_items must exist")
     }
 
     #[test]
-    fn window_menu_has_no_duplicate_or_shortcut_hint_items() {
+    fn window_menu_is_one_workflow_driven_dsh_column() {
         let menu = build_menu_source();
-        // View items: exactly three, no hand-written accelerator strings.
-        let view = menu
-            .split("Submenu::with_items(app, \"查看\"")
+        let top = top_as_binding(&menu);
+        // One column named DSH: the menu is built from this project's workflow,
+        // not from a generic Edit/View/Window/Help template.
+        assert_eq!(top.trim(), "&dsh", "menu must have exactly the DSH column");
+        assert!(!top.contains("&edit") && !top.contains("&view"), "no generic template columns");
+        assert!(!top.contains("&window") && !top.contains("&tray"), "window/tray columns removed");
+        assert!(menu.contains("Submenu::with_items(app, DSH_MENU_LABEL"),
+            "the single column must be the DSH cluster");
+        assert!(menu.contains("Submenu::with_items(app, \"关于\""), "about submenu must exist");
+        for removed in ["全屏", "set_fullscreen", "PredefinedMenuItem"] {
+            assert!(!menu.contains(removed), "{removed} must be gone (upstream/OS owns it)");
+        }
+    }
+
+    #[test]
+    fn menu_items_map_to_shell_workflows_without_duplicates() {
+        let menu = build_menu_source();
+        let column = menu
+            .split("Submenu::with_items(app, DSH_MENU_LABEL")
             .nth(1)
             .and_then(|tail| tail.split("])").next())
-            .expect("View submenu must exist");
-        // View submenu references the three item bindings (the item creation
-        // lines themselves sit above the submenu in build_menu).
-        for binding in ["&reload", "&fullscreen", "&devtools"] {
-            assert!(view.contains(binding), "View submenu must reference {binding}");
+            .expect("DSH submenu must exist");
+        let cluster = menu
+            .split("Submenu::with_items(app, \"关于\"")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("about submenu must exist");
+        // Reload (external URL has no browser refresh) and devtools (WebKitGTK
+        // bridge diagnosis) are window actions; about + star live in the cluster.
+        for binding in ["&reload", "&devtools", "&about_cluster"] {
+            assert!(column.contains(binding), "DSH column must reference {binding}");
         }
-        for id in ["reload", "fullscreen", "devtools"] {
+        for binding in ["&about", "&support"] {
+            assert!(cluster.contains(binding), "about cluster must reference {binding}");
+        }
+        assert!(cluster.contains("&about") && cluster.contains("&support"),
+            "about cluster must hold about + star");
+        assert!(!cluster.contains("&reload") && !cluster.contains("&devtools"),
+            "window actions belong directly in the DSH column");
+        assert_eq!(ABOUT_ID, "about", "about id must match the handler literal");
+        assert_eq!(SUPPORT_ID, "support", "support id must match the handler literal");
+        // reload/devtools are plain literal ids; about/support use constants.
+        for literal in ["reload", "devtools"] {
             assert_eq!(
-                menu.matches(&format!("MenuItem::with_id(app, \"{id}\"")).count(),
+                menu.matches(&format!("MenuItem::with_id(app, \"{literal}\"")).count(),
                 1,
-                "{id} item must be created exactly once across the menu"
+                "{literal} item must be created exactly once across the menu"
             );
         }
-        assert!(!view.contains("CmdOrCtrl"), "no hand-written shortcut hints in View");
-        assert!(!view.contains("F11"), "no hand-written shortcut hints in View");
-        // No duplicate star entry: one in the window menu, none in the tray.
-        assert_eq!(menu.matches(SUPPORT_ID).count(), 2, "support id: const definition + Help item only");
-        assert!(!install_tray_source().contains(SUPPORT_ID), "tray must not repeat the star entry");
+        for constant in ["ABOUT_ID", "SUPPORT_ID"] {
+            assert_eq!(
+                menu.matches(&format!("MenuItem::with_id(app, {constant}")).count(),
+                1,
+                "{constant} item must be created exactly once across the menu"
+            );
+        }
+        assert_eq!(menu.matches(SUPPORT_ID).count(), 2, "support id: const definition + menu item only");
+        // Star is in the about cluster only; tray keeps show/quit lifecycle.
+        let tray = install_tray_source();
+        assert!(!tray.contains(SUPPORT_ID), "tray must not repeat the star entry");
+        assert!(tray.contains("\"show\"") && tray.contains("\"quit\""),
+            "tray must keep show/quit untouched");
+        assert!(!menu.contains("CmdOrCtrl") && !menu.contains("F11"),
+            "no hand-written shortcut hints");
     }
 
     #[test]
@@ -537,7 +613,7 @@ mod tests {
         assert!(handler.contains("window.reload()"), "reload must use native WebviewWindow::reload()");
         // The only "window.location.reload" mention must be in the explanatory
         // comment, not in executable code. Split past the comment block.
-        let code = handler.split("silently doing nothing.").nth(1).expect("comment marker must exist");
+        let code = handler.split("instead of swallowing.").nth(1).expect("comment marker must exist");
         assert!(!code.contains("eval"), "eval-based reload is unreliable on External URL");
         assert!(handler.contains("if let Err(error)"), "reload failure must be logged, not swallowed");
     }
@@ -545,11 +621,50 @@ mod tests {
     #[test]
     fn window_menu_items_have_no_accelerator_text() {
         let menu = build_menu_source();
-        // Predefined edit items keep native platform shortcuts automatically;
-        // only custom View/Help items must avoid hand-written accelerator text.
+        // All four custom menu items are accelerator-free; GTK F11 covers
+        // fullscreen, which is deliberately not a menu item here.
         assert!(!menu.contains("Some(\"Cmd"), "command-style shortcut hints must be gone");
         assert!(!menu.contains("F11"), "F11 hint must be gone");
-        assert_eq!(menu.matches("None::<&str>").count(), 4, "reload/fullscreen/devtools/support are accelerator-free");
+        assert_eq!(menu.matches("None::<&str>").count(), 4, "reload/devtools/about/support are accelerator-free");
+    }
+
+    #[test]
+    fn about_panel_formats_shell_info_fields_with_fallback() {
+        let info = serde_json::json!({
+            "runtime": "/home/pt/.dsh/dsh-tauri/runtime",
+            "home": "/home/pt/.dsh",
+            "profile": "web",
+            "desktopVersion": "0.5.0"
+        });
+        let text = about_text(&info);
+        assert!(text.starts_with("DSH Tauri 0.5.0\n运行时: /home/pt/.dsh/dsh-tauri/runtime"));
+        assert!(text.contains("主目录: /home/pt/.dsh"));
+        assert!(text.contains("配置: web"));
+        assert!(text.ends_with("桌面版本: 0.5.0"));
+        // shell_info may carry JSON nulls; the panel must stay readable.
+        let empty = about_text(&serde_json::json!({ "runtime": null, "home": "", "profile": null, "desktopVersion": null }));
+        assert_eq!(empty.matches("未设置").count(), 5, "null/empty fields fall back (version shown twice)");
+    }
+
+    #[test]
+    fn about_uses_zenity_no_markup_and_no_new_plugin() {
+        let source = menu_source();
+        let show = source
+            .split("fn show_about")
+            .nth(1)
+            .and_then(|tail| tail.split("\n}\n").next())
+            .expect("show_about must exist");
+        assert!(show.contains("crate::dsh::info(app)"), "about must show real shell_info");
+        assert!(show.contains("Command::new(\"zenity\")"), "use the existing system helper");
+        assert!(show.contains("--no-markup"), "untrusted paths must not be parsed as markup");
+        assert!(show.contains(".spawn()"), "dialog must not block the main thread");
+        assert!(show.contains("if let Err(error)"), "dialog failure must be logged");
+        let handler = source
+            .split("ABOUT_ID =>")
+            .nth(1)
+            .and_then(|tail| tail.split("\n        }\n").next())
+            .expect("about handler must exist");
+        assert!(handler.contains("show_about(app)"), "about id must open the panel");
     }
 
 
@@ -587,11 +702,10 @@ mod tests {
     }
 
     #[test]
-    fn support_entry_is_shared_by_menu_and_tray() {
-        // Both surfaces dispatch on the same id and label, so one handler
-        // constant keeps the window menu and the tray menu from drifting.
+    fn support_lives_in_about_cluster_with_stable_id_and_label() {
         assert_eq!(SUPPORT_ID, "support");
-        assert_eq!(HELP_MENU_LABEL, "帮助");
+        assert_eq!(ABOUT_ID, "about");
+        assert_eq!(DSH_MENU_LABEL, "DSH");
         assert!(SUPPORT_ITEM_LABEL.contains("支持项目"));
         assert!(SUPPORT_ITEM_LABEL.contains('⭐'));
     }
