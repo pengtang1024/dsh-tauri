@@ -9,7 +9,7 @@ SSH 签名。提交前置检查、测试与构建命令见 [docs/DEVELOPMENT.md]
 
 | 分支 | 角色 |
 | --- | --- |
-| `master`（GitHub 上展示为 `main`，两者指代同一发布线） | 生产稳定版本，只接受 `release/*` / `hotfix/*` 收敛合入，**不直推** |
+| `master`（远端即 `origin/master`） | 生产稳定发布线，只接受 `release/*` / `hotfix/*` 收敛合入，**不直推** |
 | `develop` | 最新集成开发状态，汇集所有已完成的 `feature/*` / `fix/*` |
 
 短期分支一律从 `develop` 开出、做完合回 `develop`（`hotfix/*` 例外，从 `master` 开出）：
