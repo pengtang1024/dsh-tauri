@@ -8,6 +8,7 @@ node_modules/
 reference-upstream/
 
 # Local artefacts
+.dsh-probe-*/
 *.log
 *.png.tmp
 .DS_Store
