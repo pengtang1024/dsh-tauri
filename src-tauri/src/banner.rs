@@ -39,7 +39,12 @@ fn tagged_url(line: &str) -> Option<String> {
 }
 
 fn loose_url(line: &str) -> Option<String> {
-    let start = line.find("http://").or_else(|| line.find("https://"))?;
+    let start = match (line.find("http://"), line.find("https://")) {
+        (Some(http), Some(https)) => http.min(https),
+        (Some(http), None) => http,
+        (None, Some(https)) => https,
+        (None, None) => return None,
+    };
     let rest = &line[start..];
     let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let url = &rest[..end];
@@ -72,6 +77,12 @@ mod tests {
     #[test]
     fn falls_back_to_a_loose_url_when_nothing_is_tagged() {
         assert_eq!(web_url("serving at http://127.0.0.1:9/").as_deref(), Some("http://127.0.0.1:9/"));
+    }
+
+    #[test]
+    fn picks_the_earliest_url_when_https_precedes_http() {
+        let line = "serving at https://127.0.0.1:1234/ (health http://127.0.0.1:1234/health)";
+        assert_eq!(web_url(line).as_deref(), Some("https://127.0.0.1:1234/"));
     }
 
     #[test]
