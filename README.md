@@ -116,6 +116,7 @@ node tools/probe-web.mjs --runtime ~/.dsh/dsh-tauri/runtime   # 升级后先验�
 ## 目录
 
 ```
+src-tauri/src/main.rs      应用入口：Tauri builder、命令注册、启动流程与关停事件
 src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息

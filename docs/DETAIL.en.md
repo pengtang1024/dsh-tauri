@@ -49,6 +49,7 @@ The injection script (`src-tauri/src/native.rs::SHIM`) runs before the page scri
 ### Directory layout
 
 ```
+src-tauri/src/main.rs      Application entry: Tauri builder, command registration, startup flow and shutdown events
 src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息

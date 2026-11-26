@@ -49,6 +49,7 @@ Le script d'injection (`src-tauri/src/native.rs::SHIM`) s'exécute avant les scr
 ### Structure des répertoires
 
 ```
+src-tauri/src/main.rs      Point d'entrée : builder Tauri, enregistrement des commandes, flux de démarrage et événements d'arrêt
 src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息

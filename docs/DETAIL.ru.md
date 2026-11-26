@@ -49,6 +49,7 @@ Tauri предоставляет лишь системный WebView и Rust-б�
 ### Структура каталогов
 
 ```
+src-tauri/src/main.rs      Точка входа: конструктор Tauri, регистрация команд, процесс запуска и события завершения
 src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
