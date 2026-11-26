@@ -43,9 +43,9 @@ for (const file of sourceFiles(join(root, 'test'), '.test.mjs')) {
   for (const line of text.split(/\r?\n/)) if (npmTestLine.test(line)) npmTestCount++;
 }
 
-const shimAssertPattern = /\bassert\.[a-z]+\(/g;
+const shimAssertPattern = /\bassert\.[A-Za-z0-9_]+\(/g;
 const shimContractText = readFileSync(join(root, 'test', 'shim-contract.test.mjs'), 'utf8');
-const shimAssertCount = (shimContractText.match(shimAssertPattern) || []).length; // 预期 14
+const shimAssertCount = (shimContractText.match(shimAssertPattern) || []).length; // 预期 21
 
 const guardPath = 'tools/check-bridge-contract.mjs';
 let guardCount = null;
