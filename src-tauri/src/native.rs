@@ -121,15 +121,30 @@ fn status_message(code: Option<i32>) -> Option<String> {
     }
 }
 
+/// Format the diagnostic for a failed stdin write to `wl-copy`.
+fn write_error_message(error: &std::io::Error) -> String {
+    format!("cannot write to wl-copy: {error}")
+}
+
 #[tauri::command]
 pub fn clipboard_write(text: String) -> Result<(), String> {
     let mut child = Command::new("wl-copy")
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot run wl-copy: {error}（需要 wl-clipboard）"))?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        use std::io::Write;
-        stdin.write_all(text.as_bytes()).map_err(|error| format!("cannot write to wl-copy: {error}"))?;
+    let write_result = match child.stdin.as_mut() {
+        Some(stdin) => {
+            use std::io::Write;
+            stdin.write_all(text.as_bytes())
+        }
+        None => Ok(()),
+    };
+    if let Err(error) = write_result {
+        // drop(Child) does not reap on Unix: kill and wait before returning
+        // so a failed write cannot leave an orphaned wl-copy behind.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(write_error_message(&error));
     }
     let status = child.wait().map_err(|error| format!("wl-copy failed: {error}"))?;
     if let Some(message) = status_message(status.code()) {
@@ -261,7 +276,7 @@ pub const SHIM: &str = r#"
 mod tests {
     use super::{
         external_url_allowed, notify_args, picked_path, status_message, title_window_label,
-        HelperOutcome,
+        write_error_message, HelperOutcome,
     };
 
     #[test]
@@ -495,6 +510,17 @@ mod tests {
     fn status_message_reports_signal_termination() {
         let message = status_message(None).expect("signal termination must fail");
         assert!(message.contains("信号"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn write_error_message_keeps_diagnostic_prefix() {
+        let error = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken pipe");
+        let message = write_error_message(&error);
+        assert!(
+            message.starts_with("cannot write to wl-copy: "),
+            "unexpected message: {message}"
+        );
+        assert!(message.contains("broken pipe"), "unexpected message: {message}");
     }
 
     #[test]
