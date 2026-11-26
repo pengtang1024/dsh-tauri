@@ -17,10 +17,12 @@ npm run check:docs                           # 校验三处文档测试数与 Ru
 npm run check:versions                       # 三处版本号一致性检查（verify:fast 已包含）
 npm run check:locales                       # 校验七语言 locale JSON、meta 三字段与 detail 文档路径（verify:fast 已包含）
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
+npm run test:clean                           # test 的自清理包装（隔离 DSH_HOME，用完删除）
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
 npm run verify:fast      # 离线快速门禁：语法检查 + 文档测试数校验 + npm 单测 + 桥接契约守卫
-npm run verify:all      # 全量离线门禁：verify:fast + Rust 单测
+npm run verify:all      # 全量离线门禁：verify:fast + lint:rust + build:check + Rust 单测
+npm run lint:rust                            # clippy --all-targets -- -D warnings（verify:all 已包含）
 npm run verify:e2e   # 全量离线门禁 + 真运行时探针（自动使用工作区临时 DSH_HOME 并清理）
 npm run cargo -- test                        # Rust 单测
 npm run cargo -- build                       # Rust 构建
@@ -31,11 +33,11 @@ npm run build:check   # 链接真正的生产二进制（cfg(test) 之外的代�
 `src-tauri/target`，避开全局 `~/.cargo/config.toml` 里只读 target-dir 导致的失败；
 若调用方已显式设置 `CARGO_TARGET_DIR`，则尊重该设置。
 
-三项 npm 测试的分工：`npm test` 是**真运行时契约探针**（拉起真实 `dsh web` 验证 303 +
-cookie + 客户端 HTML）；`npm run test:unit` 测的是 **SHIM 注入脚本自身的行为**（纯 node 单测，
+四项 npm 测试的分工：`npm test` 是**真运行时契约探针**（拉起真实 `dsh web` 验证 303 +
+cookie + 客户端 HTML）；`npm run test:clean` 是 `npm test` 的**自清理包装**（每次自动建工作区内临时目录 `.dsh-probe-<pid>` 作为隔离的 `DSH_HOME`，结束时删除，不碰 `~/.dsh`）；`npm run test:unit` 测的是 **SHIM 注入脚本自身的行为**（纯 node 单测，
 不需要运行时）；`npm run test:contract` 是**上游升级后的契约漂移守卫**（只读扫描 `runtime/`，
 上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
-CI 亦执行这三项。
+CI 亦执行 `test` / `test:unit` / `test:contract` 三项。
 
 另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `check:docs` + `check:versions`
 + `check:locales` + `test:unit` + `test:contract` 六层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、
@@ -48,8 +50,8 @@ CI 亦执行这三项。
 `test:contract` 会自动 SKIP；但真正的
 端到端确认仍须跑 `npm test`（需要运行时）。`npm run verify:all` 则在 `verify:fast`
 基础上再跑一遍 `cargo test`（经 `tools/cargo.mjs` 包装脚本调用，无需手动设置
-`CARGO_TARGET_DIR`）；`verify:all` 已包含 `build:check` 链接检查（在测试之前，
-链接真正的生产二进制，覆盖 `cfg(test)` 之外的代码）；同样地，端到端真探针仍需 `npm test`。
+`CARGO_TARGET_DIR`）；`verify:all` 还包含 `lint:rust`（`cargo clippy --all-targets -- -D warnings`）；
+`verify:all` 已包含 `build:check` 链接检查（在测试之前，链接真正的生产二进制，覆盖 `cfg(test)` 之外的代码）；同样地，端到端真探针仍需 `npm test`。
 `npm run verify:e2e` 则在 `verify:all` 之后再跑一遍真运行时探针（`test:clean` 包装脚本）：
 每次在运行中自动建工作区内临时目录 `.dsh-probe-<pid>` 作为 `DSH_HOME`，结束时
 自动删除，不碰 `~/.dsh`，失败或中断也不会留下残留。
