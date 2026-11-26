@@ -105,17 +105,24 @@ fn locate_with_source(app: Option<&AppHandle>) -> Option<(PathBuf, Source)> {
     candidates.into_iter().find(|(dir, _)| has_package(dir))
 }
 
+/// Find an already installed runtime without installing or mutating anything,
+/// keeping the discovery source alongside the directory for diagnostics.
+///
+/// An invalid `DSH_TAURI_RUNTIME` yields `None` here, matching the previous
+/// read-only probe (unlike `ensure`, which reports a setup error for it).
+pub(crate) fn locate_existing_with_source(app: Option<&AppHandle>) -> Option<(PathBuf, Source)> {
+    if let Some(dir) = env_path("DSH_TAURI_RUNTIME") {
+        return has_package(&dir).then_some((dir, Source::Explicit));
+    }
+    locate_with_source(app)
+}
+
 /// Find an already installed runtime without installing or mutating anything.
 ///
 /// This is the single read-only locator, shared with `dsh::info`: the directory
-/// reported to the renderer is always the one `ensure` would drive. An invalid
-/// `DSH_TAURI_RUNTIME` yields `None` here, matching the previous read-only probe
-/// (unlike `ensure`, which reports a setup error for it).
+/// reported to the renderer is always the one `ensure` would drive.
 pub(crate) fn locate_existing(app: Option<&AppHandle>) -> Option<PathBuf> {
-    if let Some(dir) = env_path("DSH_TAURI_RUNTIME") {
-        return has_package(&dir).then_some(dir);
-    }
-    locate_with_source(app).map(|(dir, _)| dir)
+    locate_existing_with_source(app).map(|(dir, _)| dir)
 }
 
 /// Return a usable runtime, installing one on a first launch.

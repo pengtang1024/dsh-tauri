@@ -2,7 +2,7 @@
 //! geometry — everything around the DSH web UI.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
@@ -147,39 +147,150 @@ pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     Menu::with_items(app, &[&dsh])
 }
 
-/// Build the about-panel text from the same shell_info the bridge exposes.
+/// Native helpers the desktop shell leans on. Detection is a read-only PATH
+/// lookup: no helper is invoked, so a missing one can only affect the panel
+/// text, never the running session.
+const NATIVE_HELPERS: [(&str, &str); 5] = [
+    ("zenity", "关于/选取面板"),
+    ("wl-copy", "剪贴板写入"),
+    ("wl-paste", "剪贴板读取"),
+    ("notify-send", "系统通知"),
+    ("xdg-open", "外链打开")
+];
+
+#[cfg(unix)]
+fn is_executable(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_metadata: &fs::Metadata) -> bool {
+    true
+}
+
+/// Check whether a helper name is an executable on PATH without spawning a
+/// process: empty entries are skipped and missing files mean "not found".
+fn helper_in_path(name: &str, path_value: &str) -> bool {
+    path_value.split(':').any(|dir| {
+        if dir.is_empty() {
+            return false;
+        }
+        fs::metadata(Path::new(dir).join(name))
+            .map(|metadata| metadata.is_file() && is_executable(&metadata))
+            .unwrap_or(false)
+    })
+}
+
+/// Version strings come from an installed package.json (outside our control).
+/// Keep only a conservative token so a malformed value cannot inject newlines,
+/// markup or a path into the panel.
+fn display_version(raw: Option<&str>) -> String {
+    match raw {
+        Some(value) if !value.is_empty() && value.len() <= 64 && value.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_')
+        }) => value.to_owned(),
+        _ => "不可用".to_owned()
+    }
+}
+
+/// Everything the status panel reports beyond shell_info, gathered read-only.
+struct StatusFacts {
+    source: Option<&'static str>,
+    updatable: bool,
+    version: Option<String>,
+    auto_update: bool,
+    close_to_tray: bool,
+    helpers: Vec<(&'static str, bool)>
+}
+
+fn status_facts(app: Option<&AppHandle<Wry>>) -> StatusFacts {
+    let (source, updatable, version) = match crate::runtime::locate_existing_with_source(app) {
+        Some((dir, from)) => (Some(from.label()), from.updatable(), crate::runtime::version_at(&dir)),
+        None => (None, false, None)
+    };
+    let path_value = std::env::var("PATH").unwrap_or_default();
+    let helpers = NATIVE_HELPERS
+        .iter()
+        .map(|(name, _)| (*name, helper_in_path(name, &path_value)))
+        .collect();
+    StatusFacts {
+        source,
+        updatable,
+        version,
+        auto_update: crate::runtime::auto_update_enabled(),
+        close_to_tray: close_to_tray(),
+        helpers
+    }
+}
+
+fn auto_update_label(enabled: bool, updatable: bool) -> &'static str {
+    match (enabled, updatable) {
+        (false, _) => "关闭（DSH_TAURI_OFFLINE / DSH_TAURI_AUTO_UPDATE）",
+        (true, false) => "开启，但当前档位不自动写入（需手动更新）",
+        (true, true) => "开启（更新下次启动生效）"
+    }
+}
+
+fn close_label(keep_alive: bool) -> &'static str {
+    if keep_alive {
+        "关窗=托盘保活（服务与会话继续运行）"
+    } else {
+        "关窗=退出"
+    }
+}
+
+/// Build the status-panel text from shell_info plus read-only desktop facts.
 /// Pure so the exact fields and fallback wording can be tested without a window.
-fn about_text(info: &serde_json::Value) -> String {
+fn about_text(info: &serde_json::Value, facts: &StatusFacts) -> String {
     let field = |key: &str| -> String {
         match info.get(key).and_then(serde_json::Value::as_str) {
             Some(value) if !value.is_empty() => value.to_owned(),
-            _ => "未设置".to_owned(),
+            _ => "未设置".to_owned()
         }
     };
+    let helpers = NATIVE_HELPERS
+        .iter()
+        .map(|(name, purpose)| {
+            let state = if facts.helpers.iter().any(|(found, ok)| found == name && *ok) {
+                "可用"
+            } else {
+                "不可用"
+            };
+            format!("{name}（{purpose}）={state}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
-        "DSH Tauri {version}\n运行时: {runtime}\n主目录: {home}\n配置: {profile}\n桌面版本: {version}",
+        "DSH Tauri {version}\n运行时: {runtime}\n运行时来源: {source}\n运行时版本: {runtime_version}\n自动更新: {auto_update}\n关闭窗口: {close}\n原生助手: {helpers}\n桥接: SHIM 协议 1；未实现上游桌面对象（详见 docs/DESKTOP_BRIDGE.zh.md）\n主目录: {home}\n配置: {profile}\n桌面版本: {version}",
         version = field("desktopVersion"),
         runtime = field("runtime"),
+        source = facts.source.unwrap_or("未设置"),
+        runtime_version = display_version(facts.version.as_deref()),
+        auto_update = auto_update_label(facts.auto_update, facts.updatable),
+        close = close_label(facts.close_to_tray),
+        helpers = helpers,
         home = field("home"),
         profile = field("profile")
     )
 }
 
-/// Show shell_info in a lightweight native about panel. Tauri 2.12.7 itself has
-/// no dialog API (that lives in the optional tauri-plugin-dialog crate, which is
-/// not a dependency here and must not be added under this task's 0-invasion
-/// constraint). Use the system's `zenity --info` helper — already present for
-/// the folder picker in native.rs — with --no-markup so user-controlled paths
-/// are never parsed as Pango markup. No external URL, no capability, no new
-/// dependency; failures are logged and never block the menu.
+/// Show shell_info plus this shell's desktop-specific state in a lightweight
+/// native status panel. Tauri 2.12.7 itself has no dialog API (that lives in the
+/// optional tauri-plugin-dialog crate, which is not a dependency here and must
+/// not be added under this task's 0-invasion constraint). Use the system's
+/// zenity --info helper, already present for the folder picker in native.rs,
+/// with --no-markup so user-controlled paths are never parsed as Pango markup.
+/// No external URL, no capability, no new dependency; failures are logged and
+/// never block the menu.
 fn show_about(app: &AppHandle<Wry>) {
     let info = crate::dsh::info(app);
-    let text = about_text(&info);
+    let text = about_text(&info, &status_facts(Some(app)));
     // spawn, not output(): menu events run on Tauri's main thread, so waiting
     // for the dialog to close would freeze the DSH window. zenity owns its own
     // GTK loop; stderr is inherited so dialog errors stay visible in logs.
     if let Err(error) = Command::new("zenity")
-        .args(["--info", "--title", "关于 dsh-tauri", "--no-markup", "--text", &text])
+        .args(["--info", "--title", "dsh-tauri 运行状态", "--no-markup", "--text", &text])
         .spawn()
     {
         eprintln!("[dsh-tauri] 无法打开关于面板：{error}");
@@ -475,7 +586,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, resized_event_is_noop, urlencoding, WindowState, ABOUT_ID, DSH_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_version, encode_state, geometry_is_sane, helper_in_path, menu_window_label, navigate_error_message, resized_event_is_noop, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -628,6 +739,20 @@ mod tests {
         assert_eq!(menu.matches("None::<&str>").count(), 4, "reload/devtools/about/support are accelerator-free");
     }
 
+    fn facts() -> StatusFacts {
+        StatusFacts {
+            source: Some("仓库 runtime/（checkout）"),
+            updatable: false,
+            version: Some("0.2.2-rc.5".to_owned()),
+            auto_update: true,
+            close_to_tray: true,
+            helpers: vec![
+                ("zenity", true), ("wl-copy", true), ("wl-paste", false),
+                ("notify-send", true), ("xdg-open", true)
+            ]
+        }
+    }
+
     #[test]
     fn about_panel_formats_shell_info_fields_with_fallback() {
         let info = serde_json::json!({
@@ -636,14 +761,70 @@ mod tests {
             "profile": "web",
             "desktopVersion": "0.5.0"
         });
-        let text = about_text(&info);
+        let text = about_text(&info, &facts());
         assert!(text.starts_with("DSH Tauri 0.5.0\n运行时: /home/pt/.dsh/dsh-tauri/runtime"));
+        assert!(text.contains("运行时来源: 仓库 runtime/（checkout）"));
+        assert!(text.contains("运行时版本: 0.2.2-rc.5"));
+        assert!(text.contains("自动更新: 开启，但当前档位不自动写入"));
+        assert!(text.contains("关闭窗口: 关窗=托盘保活"));
+        assert!(text.contains("wl-paste（剪贴板读取）=不可用"));
+        assert!(text.contains("桥接: SHIM 协议 1；未实现上游桌面对象"));
         assert!(text.contains("主目录: /home/pt/.dsh"));
         assert!(text.contains("配置: web"));
         assert!(text.ends_with("桌面版本: 0.5.0"));
         // shell_info may carry JSON nulls; the panel must stay readable.
-        let empty = about_text(&serde_json::json!({ "runtime": null, "home": "", "profile": null, "desktopVersion": null }));
-        assert_eq!(empty.matches("未设置").count(), 5, "null/empty fields fall back (version shown twice)");
+        let empty = about_text(&serde_json::json!({ "runtime": null, "home": "", "profile": null, "desktopVersion": null }), &facts());
+        assert_eq!(empty.matches("未设置").count(), 5, "null/empty shell_info fields fall back (version shown twice)");
+    }
+
+    #[test]
+    fn status_panel_falls_back_when_facts_are_empty() {
+        let empty_facts = StatusFacts {
+            source: None,
+            updatable: false,
+            version: None,
+            auto_update: false,
+            close_to_tray: false,
+            helpers: vec![]
+        };
+        let text = about_text(&serde_json::Value::Null, &empty_facts);
+        assert!(text.contains("运行时来源: 未设置"));
+        assert!(text.contains("运行时版本: 不可用"));
+        assert!(text.contains("关闭窗口: 关窗=退出"));
+        assert!(text.contains("原生助手: zenity（关于/选取面板）=不可用"));
+        assert_eq!(text.matches("不可用").count(), 6, "all five helpers + runtime version fall back");
+        assert!(!text.contains("data-platform"), "must never mention platform injection");
+        assert!(!text.contains("dshDesktop ="), "must never inject the desktop global");
+    }
+
+    #[test]
+    fn version_and_update_labels_are_conservative() {
+        assert_eq!(display_version(Some("1.2.3")), "1.2.3");
+        assert_eq!(display_version(Some("v2.0.0-rc.1+build.5")), "v2.0.0-rc.1+build.5");
+        assert_eq!(display_version(Some("0.4.1\n[evil]")), "不可用");
+        assert_eq!(display_version(Some("/home/pt/.ssh/id_rsa")), "不可用");
+        assert_eq!(display_version(None), "不可用");
+        assert_eq!(auto_update_label(false, true), "关闭（DSH_TAURI_OFFLINE / DSH_TAURI_AUTO_UPDATE）");
+        assert_eq!(auto_update_label(true, false), "开启，但当前档位不自动写入（需手动更新）");
+        assert_eq!(auto_update_label(true, true), "开启（更新下次启动生效）");
+        assert_eq!(close_label(true), "关窗=托盘保活（服务与会话继续运行）");
+        assert_eq!(close_label(false), "关窗=退出");
+    }
+
+    #[test]
+    fn helper_detection_is_read_only_and_nonexistent_is_unavailable() {
+        assert!(!helper_in_path("definitely-not-a-real-helper-xyz", "/usr/bin:/bin"));
+        assert!(!helper_in_path("definitely-not-a-real-helper-xyz", ""));
+        assert!(helper_in_path("sh", &std::env::var("PATH").unwrap_or_default()), "baseline shell must be on PATH");
+        // No process is spawned by detection: the panel only reports presence.
+        let source = menu_source();
+        let block = source
+            .split("fn helper_in_path")
+            .nth(1)
+            .and_then(|tail| tail.split("\n}\n").next())
+            .expect("helper_in_path must exist");
+        assert!(!block.contains("Command::new"), "detection must not invoke helpers");
+        assert!(block.contains("fs::metadata"), "detection must only stat files");
     }
 
     #[test]

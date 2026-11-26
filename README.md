@@ -167,6 +167,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 - 认证链路：token URL → 303 + `dsh-auth-*` cookie → `GET /` 返回客户端 HTML（`tools/probe-web.mjs`）；
 - 窗口里是完整 Web UI：会话列表、工作区、模型选择、插件页、正在进行的会话流都在；
 - 窗口会随 `document.title` 改名；关闭按偏好走「关到托盘」或「退出」（偏好在 `~/.dsh/desktop-preferences.json` 的 `closeToTray` 字段：`true`=关到托盘，`false`=退出，缺省 `true`）；重启恢复尺寸；
+- 菜单「DSH → 关于 → 关于 dsh-tauri」是运行状态面板（zenity 非阻塞）：展示运行时来源档位与版本、自动更新状态、`closeToTray` 关窗语义、5 个原生助手的只读 PATH 可用性、SHIM 协议 1 与桥接事实；
 - 第二次启动会聚焦已有窗口后退出，不会起第二个服务；
 - 服务被杀后自动重启（最多 3 次），仍失败则显示可读的错误页；
 - 首次启动没有运行时会自动 `npm install` 到 `~/.dsh/dsh-tauri/runtime`，
@@ -175,7 +176,7 @@ docs/DEVELOPMENT.md         开发与验证手册
   正在跑的服务不受影响；
 - `DSH_TAURI_OFFLINE=1` 且本地无运行时，显示带手动命令的错误页而不是空白窗口；
 - 更新走 `<runtime>.new-<pid>` 暂存目录 + 原子替换，安装中断不会破坏已装好的运行时。
-- 八层离线验证 + 真运行时探针：`npm run verify:fast`（语法 / 文档计数 / 版本 / 本地化 / 链接 / 命令注册 / npm 单测 / 桥接契约守卫）、`npm test`（真运行时契约探针）；npm 单测为注入脚本、CLI、错误页与启动页单测，28 项（含重定向门禁 2 项）；桥接契约守卫为上游桥接漂移守卫，13 项静态检查（含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）；Rust 单测 173 项；CI 全部执行。
+- 八层离线验证 + 真运行时探针：`npm run verify:fast`（语法 / 文档计数 / 版本 / 本地化 / 链接 / 命令注册 / npm 单测 / 桥接契约守卫）、`npm test`（真运行时契约探针）；npm 单测为注入脚本、CLI、错误页与启动页单测，28 项（含重定向门禁 2 项）；桥接契约守卫为上游桥接漂移守卫，13 项静态检查（含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）；Rust 单测 176 项；CI 全部执行。
 
 ## 已知限制
 
