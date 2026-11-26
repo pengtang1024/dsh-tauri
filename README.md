@@ -72,7 +72,7 @@ cd src-tauri && cargo run
 | `DSH_TAURI_NODE` | node 可执行文件 |
 | `DSH_TAURI_PROFILE` | 启动哪个 profile（默认 `web`） |
 | `DSH_HOME` | 数据目录（默认 `~/.dsh`） |
-| `DSH_TAURI_URL` | 开发用：直接打开已在运行的服务，不自己 spawn |
+| `DSH_TAURI_URL` | 开发用：直接打开已在运行的 loopback 服务（仅 http(s)+127.0.0.1/localhost/[::1]），不自己 spawn |
 
 打包（deb / AppImage）用 `npx tauri build`，不随包分发 `node_modules`：
 **首次启动会自动安装**，把 `@deepseek-ai/dsh` 装进 `~/.dsh/dsh-tauri/runtime`，

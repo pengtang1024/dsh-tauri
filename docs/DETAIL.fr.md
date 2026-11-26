@@ -178,7 +178,7 @@ Contraintes : ne pas tuer le service en cours d'exécution (la nouvelle version 
 | `DSH_TAURI_NODE` | exécutable node |
 | `DSH_TAURI_PROFILE` | quel profil lancer (par défaut `web`) |
 | `DSH_HOME` | répertoire de données (par défaut `~/.dsh`) |
-| `DSH_TAURI_URL` | pour le développement : ouvrir directement un service déjà en cours d'exécution, sans en lancer un |
+| `DSH_TAURI_URL` | pour le développement : ouvrir directement un service loopback déjà en cours d'exécution (http(s) + 127.0.0.1/localhost/[::1] uniquement), sans en lancer un |
 
 ### Interrupteurs de mise à jour automatique (variables d'environnement)
 

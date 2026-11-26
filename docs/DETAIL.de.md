@@ -178,7 +178,7 @@ Einschränkungen: den laufenden Dienst nicht töten (die neue Version wird erst 
 | `DSH_TAURI_NODE` | node-Executable |
 | `DSH_TAURI_PROFILE` | welches Profil gestartet wird (Standard `web`) |
 | `DSH_HOME` | Datenverzeichnis (Standard `~/.dsh`) |
-| `DSH_TAURI_URL` | für die Entwicklung: einen bereits laufenden Dienst direkt öffnen, ohne einen zu starten |
+| `DSH_TAURI_URL` | für die Entwicklung: einen bereits laufenden Loopback-Dienst direkt öffnen (nur http(s) + 127.0.0.1/localhost/[::1]), ohne einen zu starten |
 
 ### Schalter für automatische Updates (Umgebungsvariablen)
 

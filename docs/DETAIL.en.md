@@ -178,7 +178,7 @@ Constraints: do not kill the running service (the new version loads only on the 
 | `DSH_TAURI_NODE` | node executable |
 | `DSH_TAURI_PROFILE` | which profile to launch (default `web`) |
 | `DSH_HOME` | data directory (default `~/.dsh`) |
-| `DSH_TAURI_URL` | for development: open an already-running service directly, without spawning one |
+| `DSH_TAURI_URL` | for development: open an already-running loopback service directly (http(s) + 127.0.0.1/localhost/[::1] only), without spawning one |
 
 ### Automatic update switches (environment variables)
 
