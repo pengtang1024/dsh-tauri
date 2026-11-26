@@ -13,6 +13,7 @@ use crate::runtime::{has_package, PACKAGE};
 use crate::swap::Staging;
 
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// npm honours the user's own config, so mirrors work out of the box.
 pub fn npm() -> PathBuf {
@@ -24,7 +25,7 @@ pub fn npm() -> PathBuf {
 
 pub fn npm_available() -> Result<(), String> {
     let program = npm();
-    match exec::run(&program, &["--version"], Duration::from_secs(30)) {
+    match exec::run(&program, &["--version"], VERSION_PROBE_TIMEOUT) {
         Ok(outcome) if outcome.ok() => Ok(()),
         Ok(outcome) => Err(version_probe_error(
             &outcome.status.to_string(),
@@ -54,7 +55,10 @@ fn run_error_message(error: &str) -> String {
 /// missing npm: keep the real status, stderr and configured path for the user.
 fn version_probe_error(status_text: &str, stderr_tail: &str, timed_out: bool, npm_label: &str) -> String {
     let detail = if timed_out {
-        format!("执行超时（30 秒），最后状态：{status_text}")
+        format!(
+            "执行超时（{} 秒），最后状态：{status_text}",
+            VERSION_PROBE_TIMEOUT.as_secs()
+        )
     } else {
         format!("执行失败，退出状态：{status_text}")
     };
@@ -153,7 +157,7 @@ fn run_install(prefix: &str, spec: &str, manual: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_args, install_target, manual_command, npm_missing, run_error_message, shell_quote, version_probe_error};
+    use super::{install_args, install_target, manual_command, npm_missing, run_error_message, shell_quote, version_probe_error, VERSION_PROBE_TIMEOUT};
     use std::path::Path;
 
     #[test]
@@ -235,6 +239,13 @@ mod tests {
         assert!(message.contains("npm ERR! lifecycle script hung"));
         assert!(message.contains("/opt/custom/bin/npm"));
         assert!(!message.contains("找不到可用的 npm"), "must not claim npm is missing");
+    }
+
+    #[test]
+    fn version_probe_error_timeout_message_uses_actual_timeout_seconds() {
+        let message = version_probe_error("signal: 15 (SIGTERM)", "", true, "npm");
+        let expected = format!("执行超时（{} 秒）", VERSION_PROBE_TIMEOUT.as_secs());
+        assert!(message.contains(&expected), "timeout message must contain the actual configured seconds: {expected}");
     }
 
     #[test]
