@@ -282,4 +282,4 @@ The window should show: session list, workspaces, model selector, and running se
 
 ## 10. Notes
 
-This project is unrelated to DeepSeek officially and contains no official binaries; the runtime is installed by the user with the commands above. The code is released under MIT, see [LICENSE](LICENSE).
+This project is unrelated to DeepSeek officially and contains no official binaries; the runtime is installed by the user with the commands above. The code is released under MIT, see [LICENSE](../LICENSE).

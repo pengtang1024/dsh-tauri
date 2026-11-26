@@ -282,4 +282,4 @@ Im Fenster sollten zu sehen sein: Sitzungsliste, Arbeitsbereiche, Modellauswahl 
 
 ## 10. Hinweise
 
-Dieses Projekt steht in keinem offiziellen Zusammenhang mit DeepSeek und enthält keine offiziellen Binärdateien; die Laufzeitumgebung wird vom Benutzer mit den obigen Befehlen installiert. Der Code steht unter der MIT-Lizenz, siehe [LICENSE](LICENSE).
+Dieses Projekt steht in keinem offiziellen Zusammenhang mit DeepSeek und enthält keine offiziellen Binärdateien; die Laufzeitumgebung wird vom Benutzer mit den obigen Befehlen installiert. Der Code steht unter der MIT-Lizenz, siehe [LICENSE](../LICENSE).

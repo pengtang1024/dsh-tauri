@@ -282,4 +282,4 @@ curl -s -o /dev/null -w '%{http_code}\n' "$(grep -ao 'http://127.0.0.1:[0-9]*/?t
 
 ## 10. 说明
 
-本项目与 DeepSeek 官方无关，不包含官方二进制；运行时由用户按上面的命令安装。代码以 MIT 发布，见 [LICENSE](LICENSE)。
+本项目与 DeepSeek 官方无关，不包含官方二进制；运行时由用户按上面的命令安装。代码以 MIT 发布，见 [LICENSE](../LICENSE)。

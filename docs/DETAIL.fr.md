@@ -282,4 +282,4 @@ La fenêtre doit afficher : liste des sessions, espaces de travail, sélecteur d
 
 ## 10. Remarques
 
-Ce projet n'est pas officiellement lié à DeepSeek et ne contient aucun binaire officiel ; l'environnement d'exécution est installé par l'utilisateur avec les commandes ci-dessus. Le code est publié sous licence MIT, voir [LICENSE](LICENSE).
+Ce projet n'est pas officiellement lié à DeepSeek et ne contient aucun binaire officiel ; l'environnement d'exécution est installé par l'utilisateur avec les commandes ci-dessus. Le code est publié sous licence MIT, voir [LICENSE](../LICENSE).

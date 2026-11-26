@@ -282,4 +282,4 @@ A janela deve mostrar: lista de sessões, espaços de trabalho, seletor de model
 
 ## 10. Observações
 
-Este projeto não tem vínculo oficial com a DeepSeek e não contém binários oficiais; o ambiente de execução é instalado pelo usuário com os comandos acima. O código é publicado sob a licença MIT, veja [LICENSE](LICENSE).
+Este projeto não tem vínculo oficial com a DeepSeek e não contém binários oficiais; o ambiente de execução é instalado pelo usuário com os comandos acima. O código é publicado sob a licença MIT, veja [LICENSE](../LICENSE).

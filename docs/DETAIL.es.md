@@ -282,4 +282,4 @@ La ventana debe mostrar: lista de sesiones, espacios de trabajo, selector de mod
 
 ## 10. Notas
 
-Este proyecto no está oficialmente relacionado con DeepSeek y no contiene binarios oficiales; el entorno de ejecución lo instala el usuario con los comandos anteriores. El código se publica bajo licencia MIT, véase [LICENSE](LICENSE).
+Este proyecto no está oficialmente relacionado con DeepSeek y no contiene binarios oficiales; el entorno de ejecución lo instala el usuario con los comandos anteriores. El código se publica bajo licencia MIT, véase [LICENSE](../LICENSE).
