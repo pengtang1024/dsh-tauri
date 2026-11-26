@@ -2,6 +2,10 @@
 
 ## 未发布
 
+- **原生菜单重构**：窗口菜单收敛为「编辑 / 查看 / 帮助」三栏，删掉与 GTK 标题栏重复的「窗口」栏及最小化/关闭项；查看栏去掉手写 accelerator，编辑栏保留系统预定义项；「支持项目 ⭐」只留在帮助菜单，托盘菜单不再重复。
+- **开发者工具 release 可用**：tauri 依赖启用 `devtools` feature，移除 `#[cfg(debug_assertions)]` 门；菜单项始终显示、始终可打开，不再出现「看得见点不动」。
+- **重新加载修复**：改用 `WebviewWindow::reload()`（原生 WebView 重载）替代在 External URL WebView 上不可靠的 `eval("window.location.reload()")`，失败时输出带上下文的日志。
+- **Rust 单测**：新增 5 项菜单结构 / devtools 门控 / reload 方式静态守卫，总数达 171 项。
 - **docs**：明确项目核心目标为 Linux 优先（优先支持各种发行版与不同版本，力求最佳兼容性、性能与最低资源消耗），Windows/macOS 仅基本支持、不做深入适配。
 
 ## 0.5.0
@@ -80,7 +84,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 166 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 171 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策

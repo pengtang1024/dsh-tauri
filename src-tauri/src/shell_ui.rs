@@ -9,9 +9,11 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
-/// Native "star this project" entry, shared by the window menu and the tray.
-/// Both handlers call `native::open_external` directly: it is a plain Rust call,
-/// so it works even before any window exists and needs no extra capability.
+/// Native "star this project" entry. The window menu owns it; the tray menu
+/// deliberately has its own show/quit actions only, so the entry is not
+/// duplicated in two places. Both handlers call `native::open_external`
+/// directly: it is a plain Rust call, so it works even before any window exists
+/// and needs no extra capability.
 const SUPPORT_ID: &str = "support";
 const HELP_MENU_LABEL: &str = "帮助";
 const SUPPORT_ITEM_LABEL: &str = "支持项目 ⭐";
@@ -113,8 +115,14 @@ fn close_to_tray() -> bool {
     value.get("closeToTray").and_then(serde_json::Value::as_bool).unwrap_or(true)
 }
 
-/// Menu shared by the window and the tray. Editing items are predefined so the
-/// WebView keeps its native clipboard and undo behaviour.
+/// Window menu: three columns (Edit / View / Help). Editing items are
+/// predefined so the WebView keeps its native clipboard and undo behaviour;
+/// View items carry no hand-written accelerators — a GTK menubar full of
+/// shortcut hints reads like a cheat sheet rather than a menu. There is
+/// deliberately no Window column: the GTK title bar already provides
+/// minimize/close buttons. The devtools item is always visible and always
+/// works: the `devtools` Cargo feature (see Cargo.toml) gates the Tauri API in
+/// release builds, so no debug-only cfg and no disabled menu state is needed.
 pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let edit = Submenu::with_items(
         app,
@@ -131,19 +139,15 @@ pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         ]
     )?;
 
-    let reload = MenuItem::with_id(app, "reload", "重新加载", true, Some("CmdOrCtrl+R"))?;
-    let fullscreen = MenuItem::with_id(app, "fullscreen", "全屏", true, Some("F11"))?;
-    let devtools = MenuItem::with_id(app, "devtools", "开发者工具", true, Some("CmdOrCtrl+Shift+I"))?;
+    let reload = MenuItem::with_id(app, "reload", "重新加载", true, None::<&str>)?;
+    let fullscreen = MenuItem::with_id(app, "fullscreen", "全屏", true, None::<&str>)?;
+    let devtools = MenuItem::with_id(app, "devtools", "开发者工具", true, None::<&str>)?;
     let view = Submenu::with_items(app, "查看", true, &[&reload, &fullscreen, &devtools])?;
-
-    let minimize = MenuItem::with_id(app, "minimize", "最小化", true, Some("CmdOrCtrl+M"))?;
-    let close = MenuItem::with_id(app, "close", "关闭窗口", true, Some("CmdOrCtrl+W"))?;
-    let window = Submenu::with_items(app, "窗口", true, &[&minimize, &close])?;
 
     let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
     let help = Submenu::with_items(app, HELP_MENU_LABEL, true, &[&support])?;
 
-    Menu::with_items(app, &[&edit, &view, &window, &help])
+    Menu::with_items(app, &[&edit, &view, &help])
 }
 
 /// Which window owns the shared menu: the real UI once it exists, otherwise the
@@ -164,32 +168,34 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
     let Some(window) = app.get_webview_window(label) else { return };
     match id {
         "reload" => {
-            let _ = window.eval("window.location.reload()");
+            // The main window is created at WebviewUrl::External(url); injecting
+            // `window.location.reload()` via eval is not reliable on an external
+            // origin. Tauri 2.12.7 exposes WebviewWindow::reload(), which reloads
+            // the current document through the native WebView on any URL and
+            // re-runs the SHIM initialization script. Log a failure instead of
+            // silently doing nothing.
+            if let Err(error) = window.reload() {
+                eprintln!("[dsh-tauri] 无法重新加载窗口：{error}");
+            }
         }
         "fullscreen" => {
             let _ = window.set_fullscreen(!window.is_fullscreen().unwrap_or(false));
         }
         "devtools" => {
-            #[cfg(debug_assertions)]
+            // Always shown, always functional in release builds too: the
+            // `devtools` Cargo feature makes this API available outside debug.
             window.open_devtools();
-        }
-        "minimize" => {
-            let _ = window.minimize();
-        }
-        "close" => {
-            save_window_state(&window);
-            let _ = window.close();
         }
         _ => {}
     }
 }
 
 /// Tray icon: left click restores the window, the menu offers show/quit.
+/// The star entry lives only in the window Help menu (no duplicate here).
 pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
-    let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &support, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("DSH")
@@ -197,11 +203,6 @@ pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
-            SUPPORT_ID => {
-                if let Err(error) = crate::native::open_external(SUPPORT_URL.to_owned()) {
-                    eprintln!("[dsh-tauri] cannot open the support page: {error}");
-                }
-            }
             "quit" => {
                 // app.exit() is a hard exit: no Destroyed event is guaranteed, so
                 // persist geometry here. Reuse the menu's label choice — the main
@@ -433,6 +434,124 @@ fn urlencoding(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, resized_event_is_noop, urlencoding, WindowState, HELP_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
+
+    // Static guards over the menu source: these are the pure, testable parts of
+    // the native menu layout (the actual widgets require a live AppHandle).
+    fn menu_source() -> String {
+        include_str!("shell_ui.rs").to_owned()
+    }
+
+    fn build_menu_source() -> String {
+        let source = menu_source();
+        let start = source.find("pub fn build_menu").expect("build_menu must exist");
+        let tail = &source[start..];
+        let end = tail.find("\n/// ").expect("build_menu must end before the next doc comment");
+        tail[..end].to_owned()
+    }
+
+    fn install_tray_source() -> String {
+        let source = menu_source();
+        let start = source.find("pub fn install_tray").expect("install_tray must exist");
+        let tail = &source[start..];
+        let end = tail.find("\nfn show_main_window").expect("install_tray must end before show_main_window");
+        tail[..end].to_owned()
+    }
+
+    #[test]
+    fn window_menu_has_exactly_three_columns() {
+        let menu = build_menu_source();
+        let top = menu
+            .split("Menu::with_items(app, &[")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("top-level Menu::with_items must exist");
+        assert_eq!(top.matches("&edit").count(), 1, "Edit column must appear once");
+        assert_eq!(top.matches("&view").count(), 1, "View column must appear once");
+        assert_eq!(top.matches("&help").count(), 1, "Help column must appear once");
+        assert!(!top.contains("&window"), "Window column must be removed");
+        assert!(!top.contains("&tray"), "tray must not be in the window menu");
+    }
+
+    #[test]
+    fn window_menu_has_no_duplicate_or_shortcut_hint_items() {
+        let menu = build_menu_source();
+        // View items: exactly three, no hand-written accelerator strings.
+        let view = menu
+            .split("Submenu::with_items(app, \"查看\"")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("View submenu must exist");
+        // View submenu references the three item bindings (the item creation
+        // lines themselves sit above the submenu in build_menu).
+        for binding in ["&reload", "&fullscreen", "&devtools"] {
+            assert!(view.contains(binding), "View submenu must reference {binding}");
+        }
+        for id in ["reload", "fullscreen", "devtools"] {
+            assert_eq!(
+                menu.matches(&format!("MenuItem::with_id(app, \"{id}\"")).count(),
+                1,
+                "{id} item must be created exactly once across the menu"
+            );
+        }
+        assert!(!view.contains("CmdOrCtrl"), "no hand-written shortcut hints in View");
+        assert!(!view.contains("F11"), "no hand-written shortcut hints in View");
+        // No duplicate star entry: one in the window menu, none in the tray.
+        assert_eq!(menu.matches(SUPPORT_ID).count(), 2, "support id: const definition + Help item only");
+        assert!(!install_tray_source().contains(SUPPORT_ID), "tray must not repeat the star entry");
+    }
+
+    #[test]
+    fn devtools_is_always_visible_and_enabled() {
+        let menu = build_menu_source();
+        // The devtools MenuItem is created with enabled = true, no cfg gate and
+        // no enabled/disabled switching anywhere in the source.
+        let devtools_line = menu
+            .lines()
+            .find(|line| line.contains("MenuItem::with_id(app, \"devtools\""))
+            .expect("devtools menu item must exist");
+        assert!(devtools_line.contains(", true, None::<&str>)"), "devtools must be visible and enabled");
+        assert!(!devtools_line.contains("CmdOrCtrl"), "no hand-written shortcut hint");
+        assert!(!menu.contains("debug_assertions"), "no debug-only cfg gate in menu");
+        let source = menu_source();
+        assert!(!source.split("// Static guards over the menu source").nth(1).is_some_and(|tests| tests.contains("DSH_DEVTOOLS")), "menu code must have no environment-variable gate");
+        let handler = source
+            .split("\"devtools\" =>")
+            .nth(1)
+            .and_then(|tail| tail.split("\n        }\n").next())
+            .expect("devtools handler must exist");
+        assert!(handler.contains("window.open_devtools()"), "handler must actually open devtools");
+        assert!(!handler.contains("cfg("), "handler must have no cfg gate");
+        // Cargo.toml must enable the feature so open_devtools exists in release.
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"devtools\""), "Cargo.toml must enable tauri devtools feature");
+    }
+
+    #[test]
+    fn reload_uses_native_webview_reload_not_eval() {
+        let source = menu_source();
+        let handler = source
+            .split("\"reload\" =>")
+            .nth(1)
+            .and_then(|tail| tail.split("\n        }\n").next())
+            .expect("reload handler must exist");
+        assert!(handler.contains("window.reload()"), "reload must use native WebviewWindow::reload()");
+        // The only "window.location.reload" mention must be in the explanatory
+        // comment, not in executable code. Split past the comment block.
+        let code = handler.split("silently doing nothing.").nth(1).expect("comment marker must exist");
+        assert!(!code.contains("eval"), "eval-based reload is unreliable on External URL");
+        assert!(handler.contains("if let Err(error)"), "reload failure must be logged, not swallowed");
+    }
+
+    #[test]
+    fn window_menu_items_have_no_accelerator_text() {
+        let menu = build_menu_source();
+        // Predefined edit items keep native platform shortcuts automatically;
+        // only custom View/Help items must avoid hand-written accelerator text.
+        assert!(!menu.contains("Some(\"Cmd"), "command-style shortcut hints must be gone");
+        assert!(!menu.contains("F11"), "F11 hint must be gone");
+        assert_eq!(menu.matches("None::<&str>").count(), 4, "reload/fullscreen/devtools/support are accelerator-free");
+    }
+
 
     #[test]
     fn clamp_to_screen_large_screen_respects_floor_and_ceiling() {
