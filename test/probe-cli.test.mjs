@@ -44,12 +44,15 @@ test('bannerUrl accepts loopback hosts over http/https and rejects external host
     'dsh web: http://127.0.0.1:44123/?token=abc',
     'dsh web: http://localhost:44123/?token=abc',
     'dsh web: https://127.0.0.1:44123/?token=abc',
-    'dsh web: http://[::1]:44123/?token=abc'
+    'dsh web: http://[::1]:44123/?token=abc',
+    'dsh web: http://LOCALHOST:1234/?token=x',
+    'dsh web: HTTPS://127.0.0.1:1234/?token=x'
   ];
   for (const line of accepted) {
     assert.equal(bannerUrl(line), line.slice('dsh web: '.length), line);
   }
   assert.equal(bannerUrl('dsh web: http://evil.example:44123/?token=abc'), null);
+  assert.equal(bannerUrl('dsh web: http://EVIL.EXAMPLE:1234/?token=x'), null);
   assert.equal(bannerUrl('dsh web: ftp://127.0.0.1:44123/?token=abc'), null);
 });
 

@@ -4,7 +4,7 @@
  * 契约与外壳 src-tauri/src/banner.rs::is_loopback_host 对齐：
  * 只接受 http/https + 127.0.0.1 / localhost / [::1] + token。
  */
-const BANNER = /dsh web:\s+(https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/\?token=[\w-]+)/;
+const BANNER = /dsh web:\s+(https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/\?token=[\w-]+)/i;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 /** 用 URL 类复核解析结果，挡住正则放过的畸形端口等无效 URL。 */
