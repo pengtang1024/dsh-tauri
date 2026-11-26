@@ -59,6 +59,7 @@
 - **单实例监听线程失败兜底**：监听线程 spawn 失败时记录日志、清理刚绑定的 socket 并 fail-open 继续启动，避免留下「死 socket」让后续启动静默退出
 - **npm 探测超时常量化**：版本探测超时值与超时错误文案由同一常量生成，杜绝手写「30 秒」与实际超时漂移，并补上对应的真实断言测试
 - **服务监控线程启动失败兜底**：服务监控线程 spawn 失败时记录日志并显示可读错误页，而不是 panic 崩溃，避免已绑定的单实例 socket 变成 stale 后让后续启动被误判为已有实例而静默退出
+- **主窗口导航失败可见**：重启后主窗口已存在时导航失败不再静默吞掉，改为输出带上下文的日志（纯函数包装文案），用户停留在旧页面时日志有线索；不引入错误页跳转
 
 **测试与质量**
 
@@ -66,7 +67,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 155 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 156 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 26 项
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策

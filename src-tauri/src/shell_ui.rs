@@ -302,6 +302,12 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
     Ok(window)
 }
 
+/// Log line for a failed navigation of an existing main window. Pure so the
+/// diagnostic wording (and the original error text) can be asserted in tests.
+fn navigate_error_message(error: &str) -> String {
+    format!("[dsh-tauri] 无法在主窗口打开服务 URL：{error}")
+}
+
 /// Open the window on the server URL, or navigate the existing one after a
 /// restart. The splash is destroyed once the real UI is up.
 pub fn show_url(app: &AppHandle<Wry>, url: &str) -> Result<(), String> {
@@ -309,7 +315,9 @@ pub fn show_url(app: &AppHandle<Wry>, url: &str) -> Result<(), String> {
     let handle = app.clone();
     app.run_on_main_thread(move || {
         if let Some(window) = handle.get_webview_window("main") {
-            let _ = window.navigate(parsed);
+            if let Err(error) = window.navigate(parsed) {
+                eprintln!("{}", navigate_error_message(&error.to_string()));
+            }
             let _ = window.set_focus();
             return;
         }
@@ -381,7 +389,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, urlencoding, WindowState};
+    use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, urlencoding, WindowState};
 
     #[test]
     fn clamp_to_screen_large_screen_respects_floor_and_ceiling() {
@@ -513,5 +521,12 @@ mod tests {
         assert!(!geometry_is_sane(&make(1280.0, 0.0)));
         assert!(!geometry_is_sane(&make(16385.0, 840.0)));
         assert!(!geometry_is_sane(&make(f64::INFINITY, 840.0)));
+    }
+
+    #[test]
+    fn navigate_error_message_keeps_context_and_original_error() {
+        let message = navigate_error_message("navigation failed: 连接被拒绝");
+        assert!(message.starts_with("[dsh-tauri] 无法在主窗口打开服务 URL："));
+        assert!(message.ends_with("navigation failed: 连接被拒绝"));
     }
 }
