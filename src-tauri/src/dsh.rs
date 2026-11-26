@@ -22,14 +22,6 @@ pub struct Config {
     pub host: String
 }
 
-fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name).map(PathBuf::from).filter(|path| !path.as_os_str().is_empty())
-}
-
-fn home_dir() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"))
-}
-
 impl Config {
     /// Locate the runtime this app should drive, installing it on a first launch.
     pub fn resolve(app: Option<&AppHandle>) -> Result<Self, String> {
@@ -43,7 +35,7 @@ impl Config {
             ));
         }
 
-        let node = env_path("DSH_TAURI_NODE").unwrap_or_else(|| PathBuf::from("node"));
+        let node = crate::runtime::env_path("DSH_TAURI_NODE").unwrap_or_else(|| PathBuf::from("node"));
         let host = std::env::var("DSH_TAURI_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
         if !crate::banner::is_loopback_host(&host) {
             return Err(format!(
@@ -55,7 +47,7 @@ impl Config {
             runtime,
             source,
             entry,
-            home: env_path("DSH_HOME").unwrap_or_else(|| home_dir().join(".dsh")),
+            home: crate::runtime::env_path("DSH_HOME").unwrap_or_else(|| crate::runtime::home_dir().join(".dsh")),
             profile: std::env::var("DSH_TAURI_PROFILE").unwrap_or_else(|_| "web".to_owned()),
             host
         })
@@ -77,7 +69,7 @@ pub(crate) fn info_into(entry: Option<&Path>, home: Option<&Path>, profile: &str
 /// This is deliberately read-only: a renderer calling `info()` must never
 /// trigger an npm install (which would race the supervisor's staged install).
 pub fn info(app: &AppHandle) -> serde_json::Value {
-    let home = env_path("DSH_HOME").unwrap_or_else(|| home_dir().join(".dsh"));
+    let home = crate::runtime::env_path("DSH_HOME").unwrap_or_else(|| crate::runtime::home_dir().join(".dsh"));
     let profile = std::env::var("DSH_TAURI_PROFILE").unwrap_or_else(|_| "web".to_owned());
     let entry = crate::runtime::locate_existing(Some(app)).map(|dir| crate::runtime::entry(&dir));
     info_into(entry.as_deref(), Some(&home), &profile)

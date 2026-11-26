@@ -44,7 +44,7 @@ impl Source {
     }
 }
 
-fn env_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).map(PathBuf::from).filter(|path| !path.as_os_str().is_empty())
 }
 
@@ -70,7 +70,7 @@ pub fn auto_update_enabled() -> bool {
     !offline() && !env_is("DSH_TAURI_AUTO_UPDATE", &["0", "false", "no", "off"])
 }
 
-fn home_dir() -> PathBuf {
+pub(crate) fn home_dir() -> PathBuf {
     std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"))
 }
 
