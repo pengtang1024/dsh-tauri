@@ -39,6 +39,9 @@ jobs:
       - name: Check version consistency
         run: npm run check:versions
 
+      - name: Check localized resources
+        run: npm run check:locales
+
       - name: Install the Tauri CLI
         run: npm ci
 
@@ -59,6 +62,9 @@ jobs:
 
       - name: Test the Rust shell
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Lint Rust shell
+        run: npm run lint:rust
 
       - name: Build the .deb and AppImage bundles
         run: npx tauri build --bundles deb,appimage
