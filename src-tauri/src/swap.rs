@@ -56,8 +56,8 @@ impl Staging {
             })?;
         }
         if let Err(error) = std::fs::rename(&self.stage, &self.target) {
-            let rollback_ok = if existing {
-                match std::fs::rename(&old, &self.target) {
+            let detail = if existing {
+                let rollback_ok = match std::fs::rename(&old, &self.target) {
                     Ok(()) => true,
                     Err(rollback_error) => {
                         eprintln!(
@@ -66,15 +66,16 @@ impl Staging {
                         );
                         false
                     }
-                }
+                };
+                rollback_message(&self.target, &old, rollback_ok)
             } else {
-                // 原本就没有旧运行时可回滚，绝不声称已恢复。
-                false
+                // 首次安装时 target 原本不存在，<old> 也已被清理：绝不给出指向不存在路径的恢复命令。
+                fresh_install_failure_message(&self.stage)
             };
             return Err(format!(
                 "无法把新运行时移动到 {}：{error}{}",
                 self.target.display(),
-                rollback_message(&self.target, &old, rollback_ok)
+                detail
             ));
         }
         self.committed = true;
@@ -113,6 +114,15 @@ fn rollback_message(target: &Path, old: &Path, rollback_ok: bool) -> String {
             old.display(), target.display(), old.display(), target.display()
         )
     }
+}
+
+/// 首次安装（target 原本不存在）时 stage → target 失败的错误尾句。
+/// 此时旧树已被清理、也没有回滚动作，绝不提 <old> 或 mv 命令——那会指向不存在的路径。
+fn fresh_install_failure_message(stage: &Path) -> String {
+    format!(
+        "（首次安装失败，未改动任何既有运行时；暂存树仍在 {}，请检查权限/磁盘后重试）",
+        stage.display()
+    )
 }
 
 /// Remove a file, directory or symlink; a missing path is not an error.
@@ -176,7 +186,7 @@ fn clean_stale(target: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_stale, is_stale_sibling, remove, rollback_message, sibling, Staging};
+    use super::{clean_stale, fresh_install_failure_message, is_stale_sibling, remove, rollback_message, sibling, Staging};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -374,6 +384,34 @@ mod tests {
         assert!(message.contains(&target.display().to_string()), "须给出正式路径：{message}");
         assert!(message.contains("mv"), "须给出手动恢复命令：{message}");
         assert!(message.contains("人工介入"), "须突出需要人工介入：{message}");
+    }
+
+    #[test]
+    fn fresh_install_failure_message_never_mentions_old_or_mv() {
+        let stage = Path::new("/tmp/dsh-runtime.new-123");
+        let old = Path::new("/tmp/dsh-runtime.old-123");
+
+        let message = fresh_install_failure_message(stage);
+        assert!(message.contains("首次安装"), "须说明这是首次安装失败：{message}");
+        assert!(message.contains("未改动任何既有运行时"), "须说明未触碰既有运行时：{message}");
+        assert!(message.contains(&stage.display().to_string()), "须指出暂存树位置：{message}");
+        assert!(!message.contains(&old.display().to_string()), "不能提不存在的旧树路径：{message}");
+        assert!(!message.contains("mv"), "不能给出注定失败的 mv 命令：{message}");
+        assert!(!message.contains("已恢复"), "首次安装失败不能声称已恢复：{message}");
+    }
+
+    #[test]
+    fn rollback_message_failure_for_existing_runtime_still_shows_old_and_mv() {
+        // existing == true 的两条分支逐字不变：失败文案仍须含 <old> 与 mv。
+        let target = Path::new("/tmp/dsh-runtime");
+        let old = Path::new("/tmp/dsh-runtime.old-123");
+
+        let failed = rollback_message(target, old, false);
+        assert!(failed.contains(&old.display().to_string()), "既有运行时失败须给出旧树路径：{failed}");
+        assert!(failed.contains("mv"), "既有运行时失败须给出手动恢复命令：{failed}");
+
+        let ok = rollback_message(target, old, true);
+        assert_eq!(ok, "（旧运行时已恢复）", "既有运行时成功文案逐字不变");
     }
 
     #[cfg(unix)]

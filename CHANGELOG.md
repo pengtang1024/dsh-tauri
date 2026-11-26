@@ -30,6 +30,7 @@
 - **错误页 hash 容错**：对畸形 hash 做容错解析，避免异常片段导致错误页渲染失败
 - **启动页轮询**：用 inFlight 标志避免并发请求与响应乱序，进入终态后停止轮询，避免旧响应覆盖最新状态
 - **swap 回滚失败可见**：原子替换回滚失败时如实报错，不再谎报成功
+- **首次安装失败文案纠正**：首次安装（原本无旧运行时）stage → target 重命名失败时，不再提示恢复不存在的 `<old>` 路径或给出必然失败的 `mv` 命令，改为说明未改动既有运行时、暂存树仍在原处并提示检查权限/磁盘后重试；既有运行时的两条分支文案不变
 - **npm 版本探测诊断**：版本探测失败时输出可诊断信息，便于定位根因
 - **版本解析收敛**：取输出中的最后一个版本号并抑制 npm notice，避免噪声干扰解析
 - **单实例 socket 隔离**：socket 路径按用户隔离，避免多用户之间互相抢占
@@ -68,7 +69,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 156 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 158 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策
