@@ -13,7 +13,7 @@
 
 ```bash
 npm run check   # 检查全部 tools 脚本语法
-npm run check:docs                           # 校验三处文档测试数与 Rust 源码一致（verify:fast 已包含）
+npm run check:docs                           # 校验文档声明的测试数/契约项数与源码一致（9 项，verify:fast 已包含）
 npm run check:versions                       # 六处版本号一致性检查（verify:fast 已包含）
 npm run check:locales                       # 校验七语言 locale JSON、meta 三字段与 detail 文档路径（verify:fast 已包含）
 npm run check:links                         # 校验文档相对链接目标存在（verify:fast 已包含）
