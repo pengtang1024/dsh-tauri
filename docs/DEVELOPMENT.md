@@ -17,12 +17,13 @@ npm run check:docs                           # 校验三处文档测试数与 Ru
 npm run check:versions                       # 三处版本号一致性检查（verify:fast 已包含）
 npm run check:locales                       # 校验七语言 locale JSON、meta 三字段与 detail 文档路径（verify:fast 已包含）
 npm run check:links                         # 校验文档相对链接目标存在（verify:fast 已包含）
+npm run check:commands                      # 校验 #[tauri::command] 均已在 main.rs 的 generate_handler! 注册（verify:fast 已包含）
 npm run check:ci                            # 校验 verify:fast 各脚本均在 CI 执行
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
 npm run test:clean                           # test 的自清理包装（隔离 DSH_HOME，用完删除）
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
-npm run verify:fast      # 离线快速门禁：语法 + 文档数 + 版本 + 本地化 + 链接 + npm 单测 + 桥接契约守卫（共 7 项）
+npm run verify:fast      # 离线快速门禁：语法 + 文档数 + 版本 + 本地化 + 链接 + 命令注册 + npm 单测 + 桥接契约守卫（共 8 项）
 npm run verify:all      # 全量离线门禁：verify:fast + lint:rust + build:check + Rust 单测
 npm run lint:rust                            # clippy --all-targets -- -D warnings（verify:all 已包含）
 npm run verify:e2e   # 全量离线门禁 + 真运行时探针（自动使用工作区临时 DSH_HOME 并清理）
@@ -41,15 +42,16 @@ cookie + 客户端 HTML）；`npm run test:clean` 是 `npm test` 的**自清理�
 上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
 CI 亦执行 `test:clean` / `test:unit` / `test:contract` 三项。
 另有一条 `npm run check:ci` 只读守卫，校验 `verify:fast` 的各叶子脚本均在 CI 中执行，防止本地新增检查却漏接 CI。
+另有一条 `npm run check:commands` 只读守卫，扫描 `src-tauri/src/**/*.rs` 中 `#[tauri::command]` 后的 `pub fn`，校验每个命令都在 `main.rs` 的 `generate_handler!` 中注册，防止新增命令漏注册导致页面调用时报 "command not found"。
 
 另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `check:docs` + `check:versions`
-+ `check:locales` + `check:links` + `test:unit` + `test:contract` 七层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、
++ `check:locales` + `check:links` + `check:commands` + `test:unit` + `test:contract` 八层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、
 `docs/DESKTOP_BRIDGE.zh.md`）里硬编码的 Rust 单测数与 `src-tauri/src/**/*.rs` 的实际
 `#[test]` 数量一致，漂移即 FAIL；`check:docs` 还校验 `tools/check-bridge-contract.mjs`
 里 `GUARD_CHECK_COUNT` 声明的契约守卫检查项数与 CHANGELOG.md 中「契约漂移守卫…静态检查」
 的项数一致（只读源码正则比对，不运行守卫），漂移即 FAIL；`check:versions` 以 package.json 为基准核对
 `package-lock.json` 顶层与 `packages[""]` 两处、`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` `[package]` 的版本号，漂移即 FAIL，
-已包含在 `verify:fast` 内；`check:locales` 只读扫描 `locale/*.json`，校验七语言（zh/en/es/fr/de/ru/pt）集合恰好齐全、每个 JSON 合法且 `meta.title` / `meta.description` / `meta.detail` 为非空字符串、`meta.detail` 指向的文档存在，漂移即 FAIL；`check:links` 只读扫描文档中的 Markdown 相对链接，校验每个目标路径存在，死链即 FAIL；全程离线、不需要真运行时，runtime 缺失时
+已包含在 `verify:fast` 内；`check:locales` 只读扫描 `locale/*.json`，校验七语言（zh/en/es/fr/de/ru/pt）集合恰好齐全、每个 JSON 合法且 `meta.title` / `meta.description` / `meta.detail` 为非空字符串、`meta.detail` 指向的文档存在，漂移即 FAIL；`check:links` 只读扫描文档中的 Markdown 相对链接，校验每个目标路径存在，死链即 FAIL；`check:commands` 只读扫描 `src-tauri/src/**/*.rs` 的 `#[tauri::command] pub fn` 与 `main.rs` 的 `generate_handler!` 注册集合，漏注册即 FAIL；全程离线、不需要真运行时，runtime 缺失时
 `test:contract` 会自动 SKIP；但真正的
 端到端确认仍须跑 `npm test`（需要运行时）。`npm run verify:all` 则在 `verify:fast`
 基础上再跑一遍 `cargo test`（经 `tools/cargo.mjs` 包装脚本调用，无需手动设置
