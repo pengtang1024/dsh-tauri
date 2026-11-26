@@ -39,12 +39,20 @@ impl Outcome {
     }
 }
 
+/// UTF-8 容错转换：无效字节替换为 U+FFFD，有效文本原样保留。
+///
+/// 用字节流而非 read_to_string：后者遇到任一无效字节会返回 Err 并把
+/// 整个 buffer 清空，导致诊断输出整段丢失。
+fn lossy_output(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Option<JoinHandle<String>> {
     pipe.map(|mut pipe| {
         std::thread::spawn(move || {
-            let mut buffer = String::new();
-            let _ = pipe.read_to_string(&mut buffer);
-            buffer
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            lossy_output(&bytes)
         })
     })
 }
@@ -209,7 +217,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
 #[cfg(test)]
 mod tests {
-    use super::{kill_running, run, should_force_kill, still_needs_kill, Registration, RUNNING};
+    use super::{kill_running, lossy_output, run, should_force_kill, still_needs_kill, Registration, RUNNING};
     use std::path::Path;
     use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
@@ -220,6 +228,22 @@ mod tests {
     /// Test helper: is this pid currently in the global RUNNING set?
     fn is_registered(pid: i32) -> bool {
         RUNNING.lock().map(|guard| guard.contains(&pid)).unwrap_or(false)
+    }
+
+    /// 合法 UTF-8 字节流必须原样转成字符串，不引入替换符。
+    #[test]
+    fn lossy_output_keeps_valid_utf8_verbatim() {
+        let bytes = b"hi \xe4\xbd\xa0\xe5\xa5\xbd ok".to_vec(); // "hi 你好 ok"
+        assert_eq!(lossy_output(&bytes), "hi 你好 ok");
+    }
+
+    /// 无效字节不得吞掉整段输出：前后文本与替换符都要保留（非空）。
+    #[test]
+    fn lossy_output_preserves_text_around_invalid_bytes() {
+        let bytes = b"hi\xffok".to_vec();
+        let output = lossy_output(&bytes);
+        assert!(!output.is_empty(), "invalid byte must not erase the whole output");
+        assert_eq!(output, "hi\u{FFFD}ok");
     }
 
     /// A child still alive after the grace period must be force-killed.
