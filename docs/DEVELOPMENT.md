@@ -17,6 +17,7 @@ npm run check:docs                           # 校验三处文档测试数与 Ru
 npm run check:versions                       # 三处版本号一致性检查（verify:fast 已包含）
 npm run check:locales                       # 校验七语言 locale JSON、meta 三字段与 detail 文档路径（verify:fast 已包含）
 npm run check:links                         # 校验文档相对链接目标存在（verify:fast 已包含）
+npm run check:ci                            # 校验 verify:fast 各脚本均在 CI 执行
 npm test                                     # 拉起 dsh web，验证 303 + cookie + 客户端 HTML
 npm run test:clean                           # test 的自清理包装（隔离 DSH_HOME，用完删除）
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
@@ -39,6 +40,7 @@ cookie + 客户端 HTML）；`npm run test:clean` 是 `npm test` 的**自清理�
 不需要运行时）；`npm run test:contract` 是**上游升级后的契约漂移守卫**（只读扫描 `runtime/`，
 上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
 CI 亦执行 `test` / `test:unit` / `test:contract` 三项。
+另有一条 `npm run check:ci` 只读守卫，校验 `verify:fast` 的各叶子脚本均在 CI 中执行，防止本地新增检查却漏接 CI。
 
 另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `check:docs` + `check:versions`
 + `check:locales` + `check:links` + `test:unit` + `test:contract` 七层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、

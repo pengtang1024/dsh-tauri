@@ -45,6 +45,9 @@ jobs:
       - name: Check documentation links
         run: npm run check:links
 
+      - name: Check CI coverage
+        run: npm run check:ci
+
       - name: Install the Tauri CLI
         run: npm ci
 
