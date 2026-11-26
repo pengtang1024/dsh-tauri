@@ -51,6 +51,11 @@ fn is_stale_socket(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Log message for an accept-thread spawn failure (kept pure for testing).
+fn spawn_failed_message(error: &std::io::Error) -> String {
+    format!("无法启动单实例监听线程，允许本实例继续启动：{error}")
+}
+
 /// Returns true when this process should keep running.
 pub fn claim(app: &AppHandle) -> bool {
     let path = socket_path();
@@ -63,10 +68,23 @@ pub fn claim(app: &AppHandle) -> bool {
         match UnixListener::bind(&path) {
             Ok(listener) => {
                 let handle = app.clone();
-                std::thread::Builder::new()
+                let spawned = std::thread::Builder::new()
                     .name("dsh-tauri-single-instance".to_owned())
-                    .spawn(move || accept_forever(listener, handle))
-                    .ok();
+                    .spawn(move || accept_forever(listener, handle));
+                if let Err(error) = spawned {
+                    eprintln!("[dsh-tauri] {}", spawn_failed_message(&error));
+                    // binding socket 成功但线程没起来：内核 backlog 会让后续启动
+                    // connect/write 都成功，造成「没有实例在跑却每次闪退」的假死。
+                    // 仅当路径仍是我们刚绑定的 socket 才移除；listener 随闭包 drop
+                    // 自动关闭。fail-open：本实例继续启动。
+                    if is_stale_socket(&path) {
+                        if let Err(remove_error) = std::fs::remove_file(&path) {
+                            eprintln!(
+                                "[dsh-tauri] 无法移除刚绑定但监听线程未启动的 socket: {remove_error}"
+                            );
+                        }
+                    }
+                }
                 return true;
             }
             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
@@ -247,5 +265,12 @@ mod tests {
         // symlink_metadata must not follow the link: a link is never removable.
         assert!(!is_stale_socket(&link));
         drop(listener);
+    }
+
+    #[test]
+    fn spawn_failed_message_includes_prefix_and_error() {
+        let message = spawn_failed_message(&std::io::Error::other("资源耗尽"));
+        assert!(message.starts_with("无法启动单实例监听"), "{message}");
+        assert!(message.contains("资源耗尽"), "{message}");
     }
 }
