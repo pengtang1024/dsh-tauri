@@ -53,9 +53,19 @@ fn claim_shutdown(done: &AtomicBool) -> bool {
     !done.swap(true, Ordering::SeqCst)
 }
 
+/// Pure error-page text for a supervisor thread that could not be spawned.
+/// Kept separate from `launch` so the wording is testable without exhausting
+/// the OS thread limit.
+fn spawn_failed_message(error: &std::io::Error) -> String {
+    format!("无法启动服务监控线程：{error}")
+}
+
 /// Start the server and keep it supervised on a background thread.
 pub fn launch(app: AppHandle) {
-    std::thread::Builder::new()
+    // The supervisor closure takes `app`; keep a clone for the spawn-failure
+    // path, where no such closure will ever run.
+    let error_app = app.clone();
+    let spawned = std::thread::Builder::new()
         .name("dsh-supervisor".to_owned())
         .spawn(move || {
             if let Err(error) = run(&app) {
@@ -68,8 +78,25 @@ pub fn launch(app: AppHandle) {
                     }
                 });
             }
-        })
-        .expect("spawning the supervisor thread");
+        });
+    match spawned {
+        Ok(_) => {}
+        Err(error) => {
+            // No supervisor thread exists, so no closure can report this one.
+            // Take the same error-page path here instead of panicking: a panic
+            // after single-instance bound its socket leaves a stale socket and
+            // every later launch exits silently with no usable instance.
+            eprintln!("[dsh-tauri] spawning the supervisor thread failed: {error}");
+            let message = spawn_failed_message(&error);
+            progress::fail(message.clone());
+            let handle = error_app.clone();
+            let _ = error_app.run_on_main_thread(move || {
+                if let Err(error) = crate::shell_ui::show_error(&handle, &message) {
+                    eprintln!("[dsh-tauri] cannot show the error window: {error}");
+                }
+            });
+        }
+    }
 }
 
 fn run(app: &AppHandle) -> Result<(), String> {
@@ -267,7 +294,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use super::{claim_shutdown, missing_session_reason, recover_lock, term_result_ok};
+    use super::{
+        claim_shutdown, missing_session_reason, recover_lock, spawn_failed_message, term_result_ok
+    };
 
     #[test]
     fn claim_shutdown_is_idempotent() {
@@ -338,5 +367,13 @@ mod tests {
     fn missing_session_reason_outside_shutdown_keeps_original_text() {
         assert_eq!(missing_session_reason(false), "process {pid} ended");
         assert_eq!(missing_session_reason(false).replace("{pid}", "42"), "process 42 ended");
+    }
+
+    #[test]
+    fn spawn_failed_message_keeps_prefix_and_original_error() {
+        let error = std::io::Error::other("resource temporarily unavailable");
+        let message = spawn_failed_message(&error);
+        assert!(message.starts_with("无法启动服务监控线程"), "unexpected message: {message}");
+        assert!(message.contains("resource temporarily unavailable"), "error lost: {message}");
     }
 }
