@@ -89,12 +89,13 @@ docs/DEVELOPMENT.md         开发与验证手册
 
 - Node 24+ (в PATH или указанный через `DSH_TAURI_NODE`)
 - Rust 1.9x, `webkit2gtk-4.1`, `libsoup-3.0`, `librsvg2`, `libayatana-appindicator3`, `patchelf`
-- Средства GNOME в среде выполнения: `zenity` (выбор каталога), `wl-clipboard` (буфер обмена), `libnotify-bin` (уведомления)
+- Вспомогательные программы: `zenity` (выбор каталога / панель «О программе»), `wl-clipboard` (буфер обмена), `libnotify-bin` (уведомления через `notify-send`), `xdg-utils` (внешние ссылки через `xdg-open`)
+- Пакет `.deb` для Debian / Ubuntu объявляет все четыре программы в `bundle.linux.deb.depends`, поэтому они устанавливаются автоматически и работают сразу; для AppImage и запуска из исходников их нужно установить вручную:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin
+  zenity wl-clipboard libnotify-bin xdg-utils
 ```
 
 ## 4. Сборка и использование

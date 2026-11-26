@@ -89,12 +89,13 @@ docs/DEVELOPMENT.md         开发与验证手册
 
 - Node 24+ (no PATH, ou especificado por `DSH_TAURI_NODE`)
 - Rust 1.9x, `webkit2gtk-4.1`, `libsoup-3.0`, `librsvg2`, `libayatana-appindicator3`, `patchelf`
-- Ferramentas GNOME em tempo de execução: `zenity` (seletor de diretório), `wl-clipboard` (área de transferência), `libnotify-bin` (notificações)
+- Utilitários de execução: `zenity` (seletor de diretório / painel Sobre), `wl-clipboard` (área de transferência), `libnotify-bin` (notificações via `notify-send`), `xdg-utils` (links externos via `xdg-open`)
+- O pacote `.deb` para Debian / Ubuntu declara os quatro utilitários em `bundle.linux.deb.depends`, portanto eles são instalados automaticamente e funcionam imediatamente; no AppImage ou na execução a partir do código-fonte, instale-os manualmente:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin
+  zenity wl-clipboard libnotify-bin xdg-utils
 ```
 
 ## 4. Compilação e uso

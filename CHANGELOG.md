@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- **deb 运行时助手依赖**：把 README 声明的四个运行时助手（`zenity` / `wl-clipboard` / `libnotify-bin` / `xdg-utils`）补进 `tauri.conf.json` 的 `bundle.linux.deb.depends`，Debian / Ubuntu 的 `.deb` 安装后目录选择、剪贴板、通知与外链开箱即用（Tauri 的 depends 是覆盖语义，需显式声明）；README 与七语言详情页的依赖段同步该口径并在 apt 示例补上 `xdg-utils`。
 - **菜单按项目工作流重新设计**：放弃通用桌面模板裁剪，窗口菜单收敛为单栏 `DSH`（重新加载 / 开发者工具 / 关于簇），每项只对应本项目工作流——External URL 无浏览器刷新键所以需要重新加载、WebKitGTK 上排查 Web UI/桥接需要开发者工具、外壳独有的 shell_info 需要关于面板回答「跑的是哪个运行时」；「关于」簇内含「关于 dsh-tauri」与「支持项目 ⭐」，不设编辑/查看/窗口栏与全屏（上游自管剪贴板、GTK F11 与标题栏已覆盖），托盘保持显示主窗口/退出不动。
 - **开发者工具 release 可用**：菜单项始终显示、始终可打开，无禁用态、无环境变量门；Cargo.toml 的 `devtools` feature 保持不变，不再出现「看得见点不动」。
 - **关于面板**：Tauri 2.12.7 本体无 dialog API（可选插件未引入、0 浸入不新增依赖），用系统 `zenity --info --no-markup` 展示 shell_info（运行时/主目录/配置/桌面版本），空值回退「未设置」。

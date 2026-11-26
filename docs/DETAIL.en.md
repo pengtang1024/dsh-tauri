@@ -89,12 +89,13 @@ docs/DEVELOPMENT.md         开发与验证手册
 
 - Node 24+ (on PATH, or specified by `DSH_TAURI_NODE`)
 - Rust 1.9x, `webkit2gtk-4.1`, `libsoup-3.0`, `librsvg2`, `libayatana-appindicator3`, `patchelf`
-- Runtime GNOME tools: `zenity` (directory picker), `wl-clipboard` (clipboard), `libnotify-bin` (notifications)
+- Runtime helpers: `zenity` (directory picker / About panel), `wl-clipboard` (clipboard), `libnotify-bin` (`notify-send` notifications), `xdg-utils` (`xdg-open` external links)
+- The Debian / Ubuntu `.deb` package declares all four helpers in `bundle.linux.deb.depends`, so they are pulled in at install time and work out of the box; AppImage and source runs require installing them manually:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin
+  zenity wl-clipboard libnotify-bin xdg-utils
 ```
 
 ## 4. Build and Usage

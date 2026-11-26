@@ -89,12 +89,13 @@ docs/DEVELOPMENT.md         开发与验证手册
 
 - Node 24+（在 PATH 里，或 `DSH_TAURI_NODE` 指定）
 - Rust 1.9x、`webkit2gtk-4.1`、`libsoup-3.0`、`librsvg2`、`libayatana-appindicator3`、`patchelf`
-- 运行时 Gnome 工具：`zenity`（目录选择）、`wl-clipboard`（剪贴板）、`libnotify-bin`（通知）
+- 运行时助手：`zenity`（目录选择 / 关于面板）、`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）
+- Debian / Ubuntu 的 `.deb` 包已在 `bundle.linux.deb.depends` 中声明这 4 个助手，安装时一并拉取，开箱即用；AppImage 与源码运行需自行安装：
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin
+  zenity wl-clipboard libnotify-bin xdg-utils
 ```
 
 ## 4. 构建与用法
