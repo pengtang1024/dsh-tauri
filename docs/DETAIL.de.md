@@ -8,6 +8,10 @@ Ein Desktop-Client für [DeepSeek Harness](https://github.com/deepseek-ai), geba
 
 **Weder Electron noch DSH Desktop müssen installiert werden.** Ein `node` und eine Kopie von `node_modules/@deepseek-ai/dsh` sind die gesamte Laufzeitumgebung.
 
+### Kernziel
+
+Im Vordergrund steht Linux — in allen Distributionen und Versionen — mit dem Ziel der bestmöglichen Kompatibilität, Leistung und des geringsten Ressourcenverbrauchs. Windows und macOS werden nur grundlegend unterstützt; eine tiefgehende Anpassung oder Optimierung ist für sie nicht vorgesehen.
+
 ### Worin unterscheidet sich das vom „Hineinstopfen einer Electron-App in Tauri"?
 
 Tauri stellt nur die System-WebView und ein Rust-Backend bereit; es liefert keine Node-Laufzeit mit. Der entscheidende Punkt ist daher nicht ein anderer Mantel, sondern **welcher Kern ausgeführt wird**:
@@ -279,7 +283,7 @@ Im Fenster sollten zu sehen sein: Sitzungsliste, Arbeitsbereiche, Modellauswahl 
 | Eingebettete Ansicht der Plattformseite (Nutzung / Aufladen) | Wird im Browser geöffnet; keine native Einbettung implementiert |
 | Alte Laufzeitumgebung belegt nach dem Update Speicher | Der alte Baum wird in `<runtime>.old-<pid>` umbenannt und für den noch laufenden Dienst aufbewahrt, **erst beim nächsten Start aufgeräumt**; in der Zwischenzeit belegt er etwa eine zusätzliche Kopie der Laufzeitumgebung (ca. 1.2G) |
 | SIGKILL-Reste | Wird der Mantel mit `SIGKILL` beendet, bleibt keine Zeit, Kindprozesse abzuräumen, sodass npm-`postinstall`-Enkelprozesse kurzzeitig zurückbleiben können; ein normales Beenden (SIGTERM) ist nicht betroffen |
-| Windows / macOS | Der Code ist gegen Linux-Native-Befehle geschrieben (zenity/wl-clipboard/notify-send); andere Plattformen erfordern Ersetzungen dieser Stellen |
+| Windows / macOS | Nur grundlegende Unterstützung, ohne tiefgehende Anpassung oder Optimierung; der Code ist gegen Linux-Native-Befehle geschrieben (zenity/wl-clipboard/notify-send), wurde noch nicht umfassend über Distributionen hinweg verifiziert und andere Plattformen erfordern Ersetzungen dieser Stellen |
 | Fensterposition unter Wayland | Vom Compositor bestimmt; `position()` wirkt nur auf Compositoren im X11-Stil |
 | Wartezeit beim ersten Start | Phase und verstrichene Zeit sind sichtbar, aber es gibt keine zeilenweise npm-Ausgabe |
 

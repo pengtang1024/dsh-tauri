@@ -8,6 +8,12 @@
 
 **不需要 Electron，也不需要安装 DSH Desktop。** 一个 `node` 加一份 `node_modules/@deepseek-ai/dsh` 就是全部运行时。
 
+### 核心目标
+
+**本项目以 Linux 为第一优先**：优先支持 Linux 的各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好；Windows 与 macOS 仅提供基本支持，不做深入优化或适配。
+
+> 现状说明：当前代码仍依赖 Linux 原生命令（`zenity` / `wl-clipboard` / `notify-send`），且只在 Linux + WebKitGTK 2.52 上验证过。多发行版兼容是目标，不代表已全面验证。
+
 ### 和「把 Electron 应用塞进 Tauri」有什么不同
 
 Tauri 只提供系统 WebView 和 Rust 后端，不带 Node 运行时。所以关键不在于换个壳，而在于**跑哪个本体**：
@@ -279,7 +285,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "$(grep -ao 'http://127.0.0.1:[0-9]*/?t
 | 平台页内嵌视图（用量 / 充值） | 走浏览器打开，未做原生内嵌 |
 | 更新后的旧运行时占盘 | 旧树改名 `<runtime>.old-<pid>` 保留给仍在跑的服务，**到下次启动才清理**；期间多占约一份运行时的空间（约 1.2G） |
 | SIGKILL 残留 | 外壳被 `SIGKILL` 时来不及收子进程，npm 的 `postinstall` 孙进程可能短暂残留；正常退出（SIGTERM）不受影响 |
-| Windows / macOS | 代码按 Linux 原生命令编写（zenity/wl-clipboard/notify-send），其它平台需要替换这几处 |
+| Windows / macOS | **仅基本支持、不做深入适配**：不是项目核心目标。代码按 Linux 原生命令编写（zenity/wl-clipboard/notify-send），其它平台需要替换这几处 |
 | Wayland 窗口位置 | 由合成器决定，`position()` 只影响 X11 风格合成器 |
 | 首启动等待 | 能看阶段与已用时，但没有逐行 npm 输出 |
 

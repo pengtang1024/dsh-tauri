@@ -8,6 +8,10 @@ A desktop client for [DeepSeek Harness](https://github.com/deepseek-ai) built wi
 
 **Neither Electron nor DSH Desktop needs to be installed.** One `node` plus one copy of `node_modules/@deepseek-ai/dsh` is the entire runtime.
 
+### Core Goal
+
+Priority goes to Linux — across distributions and versions — with the aim of the best compatibility, performance, and lowest resource use. Windows and macOS are supported only at a basic level; no in-depth adaptation or optimization is planned for them.
+
 ### How this differs from "stuffing an Electron app into Tauri"
 
 Tauri only provides the system WebView and a Rust backend; it does not ship a Node runtime. So the key is not shelling it differently, but **which core you run**:
@@ -279,7 +283,7 @@ The window should show: session list, workspaces, model selector, and running se
 | Platform page embedded view (usage / recharge) | Opened in a browser; no native embedding implemented |
 | Old runtime takes up disk after update | The old tree is renamed `<runtime>.old-<pid>` and kept for the still-running service, **cleaned only on the next launch**; during that time it occupies about one extra copy of the runtime (about 1.2G) |
 | SIGKILL residue | When the shell is `SIGKILL`ed it has no time to reap child processes, so npm's `postinstall` grandchildren may briefly remain; normal exit (SIGTERM) is unaffected |
-| Windows / macOS | The code is written against Linux native commands (zenity/wl-clipboard/notify-send); other platforms need these replaced |
+| Windows / macOS | Basic support only, with no in-depth adaptation or optimization; the code is written against Linux native commands (zenity/wl-clipboard/notify-send), has not been fully verified across distributions, and other platforms need these replaced |
 | Wayland window position | Determined by the compositor; `position()` only affects X11-style compositors |
 | First-launch wait | Stage and elapsed time are visible, but there is no line-by-line npm output |
 

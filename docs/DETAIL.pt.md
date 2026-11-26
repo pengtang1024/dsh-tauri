@@ -8,6 +8,10 @@ Um cliente desktop para o [DeepSeek Harness](https://github.com/deepseek-ai) con
 
 **Não é necessário instalar o Electron nem o DSH Desktop.** Um `node` e uma cópia de `node_modules/@deepseek-ai/dsh` constituem todo o ambiente de execução.
 
+### Objetivo principal
+
+A prioridade é o Linux — em todas as distribuições e versões — com o objetivo de garantir a melhor compatibilidade, desempenho e o menor consumo de recursos. Windows e macOS contam apenas com suporte básico; não está prevista uma adaptação ou otimização profunda para eles.
+
 ### Em que isso difere de «colocar um aplicativo Electron dentro do Tauri»?
 
 O Tauri fornece apenas a WebView do sistema e um backend em Rust; ele não inclui um ambiente de execução Node. Portanto, o ponto-chave não é trocar a casca, mas **qual núcleo é executado**:
@@ -279,7 +283,7 @@ A janela deve mostrar: lista de sessões, espaços de trabalho, seletor de model
 | Visualização incorporada da página da plataforma (uso / recarga) | Aberta no navegador; nenhuma incorporação nativa implementada |
 | Ambiente de execução antigo ocupa disco após a atualização | A árvore antiga é renomeada `<runtime>.old-<pid>` e mantida para o serviço ainda em execução, **limpa apenas no próximo lançamento**; nesse período ocupa aproximadamente uma cópia extra do ambiente de execução (cerca de 1.2G) |
 | Resíduos por SIGKILL | Quando a casca recebe `SIGKILL`, não tem tempo de recolher os processos filhos, então os processos-netos `postinstall` do npm podem permanecer brevemente; a saída normal (SIGTERM) não é afetada |
-| Windows / macOS | O código foi escrito contra comandos nativos do Linux (zenity/wl-clipboard/notify-send); outras plataformas exigem substituí-los |
+| Windows / macOS | Apenas suporte básico, sem adaptação ou otimização profundas; o código foi escrito contra comandos nativos do Linux (zenity/wl-clipboard/notify-send), ainda não foi totalmente validado em todas as distribuições e outras plataformas exigem substituí-los |
 | Posição da janela no Wayland | Determinada pelo compositor; `position()` afeta apenas compositores no estilo X11 |
 | Espera no primeiro lançamento | O estágio e o tempo decorrido são visíveis, mas não há saída do npm linha a linha |
 

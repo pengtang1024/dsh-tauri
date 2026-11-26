@@ -8,6 +8,10 @@ Un cliente de escritorio para [DeepSeek Harness](https://github.com/deepseek-ai)
 
 **No hace falta instalar Electron ni DSH Desktop.** Un `node` y una copia de `node_modules/@deepseek-ai/dsh` constituyen todo el entorno de ejecución.
 
+### Objetivo principal
+
+La prioridad es Linux, en todas sus distribuciones y versiones, buscando la mejor compatibilidad, rendimiento y el menor consumo de recursos. Windows y macOS solo reciben soporte básico; no se prevé una adaptación u optimización profunda para ellos.
+
 ### ¿En qué se diferencia de «meter una aplicación Electron dentro de Tauri»?
 
 Tauri solo proporciona el WebView del sistema y un backend en Rust; no incluye un entorno de ejecución de Node. Por tanto, la clave no está en cambiar el envoltorio, sino en **qué núcleo se ejecuta**:
@@ -279,7 +283,7 @@ La ventana debe mostrar: lista de sesiones, espacios de trabajo, selector de mod
 | Vista incrustada de la página de la plataforma (uso / recarga) | Se abre en el navegador; no se ha implementado incrustación nativa |
 | El entorno de ejecución antiguo ocupa disco tras la actualización | El árbol antiguo se renombra `<runtime>.old-<pid>` y se conserva para el servicio aún en ejecución; **se limpia solo en el próximo inicio**; durante ese tiempo ocupa aproximadamente una copia adicional del entorno de ejecución (unos 1.2G) |
 | Residuos por SIGKILL | Cuando el envoltorio recibe `SIGKILL` no tiene tiempo de recoger los procesos hijos, por lo que los procesos nietos de `postinstall` de npm pueden permanecer brevemente; la salida normal (SIGTERM) no se ve afectada |
-| Windows / macOS | El código está escrito contra comandos nativos de Linux (zenity/wl-clipboard/notify-send); otras plataformas necesitan sustituirlos |
+| Windows / macOS | Solo soporte básico, sin adaptación ni optimización profundas; el código está escrito contra comandos nativos de Linux (zenity/wl-clipboard/notify-send), aún no se ha verificado por completo en todas las distribuciones y otras plataformas necesitan sustituirlos |
 | Posición de la ventana en Wayland | La decide el compositor; `position()` solo afecta a compositores de estilo X11 |
 | Espera en el primer inicio | Se pueden ver la fase y el tiempo transcurrido, pero no hay salida de npm línea por línea |
 
