@@ -6,12 +6,12 @@
  * recursively, strict line-start match so helpers/comments are not counted).
  * It also checks the bridge contract guard's check count (the GUARD_CHECK_COUNT
  * constant in tools/check-bridge-contract.mjs) against the counts documented in
- * CHANGELOG.md and README.md, without running the guard (which scans thousands
- * of files).
+ * CHANGELOG.md, README.md and docs/DESKTOP_BRIDGE.zh.md, without running the
+ * guard (which scans thousands of files).
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
  * Prints one PASS/FAIL per check with file:line and expected/actual, then
- * "SUMMARY: 8 checks, M FAILS". Exits 1 when any check fails, else 0.
+ * "SUMMARY: 9 checks, M FAILS". Exits 1 when any check fails, else 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -65,6 +65,7 @@ const checks = [
   { name: 'README.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'README.md', pattern: /上游桥接漂移守卫，(\d+) 项静态检查/, expected: guardCount },
   { name: 'CHANGELOG.md npm 单测', file: 'CHANGELOG.md', pattern: /npm 单测总数达 (\d+) 项/, expected: npmTestCount },
   { name: 'CHANGELOG.md SHIM 契约断言数', file: 'CHANGELOG.md', pattern: /SHIM 契约单测（(\d+) 项断言）/, expected: shimAssertCount },
+  { name: 'DESKTOP_BRIDGE.zh.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'docs/DESKTOP_BRIDGE.zh.md', pattern: /契约守卫 (\d+) checks 0 FAIL/, expected: guardCount },
 ];
 
 const FAILS = [];
