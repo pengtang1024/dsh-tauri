@@ -73,8 +73,15 @@ pub fn claim(app: &AppHandle) -> bool {
                 // A live primary owns the socket; ask it to come forward.
                 match UnixStream::connect(&path) {
                     Ok(mut stream) => {
-                        let _ = stream.write_all(b"focus\n");
-                        return false;
+                        match stream.write_all(b"focus\n") {
+                            Ok(()) => return false,
+                            Err(write_error) => {
+                                eprintln!(
+                                    "[dsh-tauri] 无法把焦点请求发给已有实例：{write_error}；允许本实例启动"
+                                );
+                                return true;
+                            }
+                        }
                     }
                     Err(connect_error) => {
                         // Connect failed. Only a genuine socket may be removed;
