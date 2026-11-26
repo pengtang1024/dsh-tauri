@@ -10,7 +10,7 @@
 
 ### 核心目标
 
-**目标层**：本项目以 Linux 为第一优先、深度支持——优先支持各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好，Linux 是唯一完成适配与验证的平台；Windows / macOS 提供桌面端基础支持——能构建、能运行即可，不做深入适配与优化；移动端（iOS / Android）不支持——架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
+**目标层**：本项目以 Linux 为第一优先、深度支持——优先支持各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好，Linux 是唯一完成适配与验证的平台；Windows / macOS 提供桌面端基础支持——能构建、能运行即可，不做深入适配与优化，建议直接从官方渠道下载 DeepSeek Harness 官方桌面版本，本项目的 Tauri 壳不作为 Win/Mac 用户的首选方案；移动端（iOS / Android）不支持——架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
 > **现状层（如实说明）**：Linux 是唯一完成适配与验证的平台（当前代码依赖 Linux 原生命令 `zenity` / `wl-clipboard` / `notify-send`，且只在 Linux + WebKitGTK 2.52 上验证过；多发行版兼容仍是目标，不代表已全面验证）。Windows / macOS 提供基础支持、能构建能运行，但不做深入适配与优化，未做全面验证；移动端（iOS / Android）明确不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
@@ -285,7 +285,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "$(grep -ao 'http://127.0.0.1:[0-9]*/?t
 | 平台页内嵌视图（用量 / 充值） | 走浏览器打开，未做原生内嵌 |
 | 更新后的旧运行时占盘 | 旧树改名 `<runtime>.old-<pid>` 保留给仍在跑的服务，**到下次启动才清理**；期间多占约一份运行时的空间（约 1.2G） |
 | SIGKILL 残留 | 外壳被 `SIGKILL` 时来不及收子进程，npm 的 `postinstall` 孙进程可能短暂残留；正常退出（SIGTERM）不受影响 |
-| Windows / macOS / 移动端（iOS / Android） | **Windows / macOS 基础支持**：能构建、能运行即可，不做深入适配与优化，未做全面验证；**移动端（iOS / Android）不支持**：架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用；仅 Linux 完成适配与验证 |
+| Windows / macOS / 移动端（iOS / Android） | **Windows / macOS 基础支持**：能构建、能运行即可，不做深入适配与优化，未做全面验证；建议 Win/Mac 用户直接从官方渠道下载 DeepSeek Harness 官方桌面版本，本项目 Tauri 壳不作为首选方案；**移动端（iOS / Android）不支持**：架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用；仅 Linux 完成适配与验证 |
 | Wayland 窗口位置 | 由合成器决定，`position()` 只影响 X11 风格合成器 |
 | 首启动等待 | 能看阶段与已用时，但没有逐行 npm 输出 |
 
