@@ -80,7 +80,7 @@ cd src-tauri && cargo run
 **首次启动会自动安装**，把 `@deepseek-ai/dsh` 装进 `~/.dsh/dsh-tauri/runtime`，
 期间 splash 会显示阶段（查找 / 安装 / 启动）与已用时，不需要你先跑任何命令。
 
-外壳会按「`DSH_TAURI_RUNTIME` → 仓库内 `runtime/` → `~/.dsh/dsh-tauri/runtime`」依次查找。
+外壳会按「`DSH_TAURI_RUNTIME` → 仓库内 `runtime/` → `~/.dsh/dsh-tauri/runtime` → 打包资源目录下的 `runtime/`」依次查找。
 只有在**离线**时才需要手动装一次：
 
 ```bash
@@ -118,7 +118,7 @@ node tools/probe-web.mjs --runtime ~/.dsh/dsh-tauri/runtime   # 升级后先验�
 ```
 src-tauri/src/main.rs      应用入口：Tauri builder、命令注册、启动流程与关停事件
 src-tauri/src/dsh.rs        运行时配置解析与信息上报
-src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
+src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录 → 打包资源目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
 src-tauri/src/update.rs     启动后后台 `npm view` 比对版本、自动装新、notify-send
 src-tauri/src/swap.rs       `.new-<pid>` 暂存 + 原子 rename，启动时清理 `.old-*`
