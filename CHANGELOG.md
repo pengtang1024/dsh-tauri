@@ -107,6 +107,7 @@
 - **环境变量表补 loopback 约束**：README 与七语言详情页共 8 处的 `DSH_TAURI_URL` 说明同步为仅 http(s)+loopback（127.0.0.1 / localhost / [::1]），不再让人误以为可指向外部服务
 - **环境变量表补齐覆盖项**：README 与七语言详情页的变量表补上 `DSH_TAURI_HOST`（loopback 绑定主机）与 `DSH_TAURI_NPM`（npm 路径覆盖），与源码实际读取项一致
 - **deb 托盘依赖**：deb 的 depends 补上 `libayatana-appindicator3-1`，Tauri 的 depends 是覆盖语义、托盘 dlopen 的库需显式声明，避免干净系统安装后托盘静默不可用
+- **关到托盘偏好说明**：README 与七语言详情页补上 `~/.dsh/desktop-preferences.json` 的 `closeToTray` 字段位置与语义（`true` 关到托盘、`false` 退出、缺省 `true`），用户可按文档更改关窗行为
 
 ## 0.4.1
 
