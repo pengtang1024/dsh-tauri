@@ -175,7 +175,7 @@ pub fn open_external(url: String) -> Result<(), String> {
 /// The `--` terminator stops GLib/GOption from interpreting a title or body
 /// that starts with `-` (e.g. `--help`, `-u`) as an option, so page-provided
 /// text is always passed through as plain summary/body text.
-fn notify_args<'a>(title: &'a str, body: &'a str) -> Vec<&'a str> {
+pub(crate) fn notify_args<'a>(title: &'a str, body: &'a str) -> Vec<&'a str> {
     vec!["-a", "DSH", "--", title, body]
 }
 

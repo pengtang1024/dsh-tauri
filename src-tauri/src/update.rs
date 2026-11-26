@@ -160,7 +160,8 @@ fn upstream_version() -> Result<String, String> {
 /// Desktop notification; a missing notification daemon is only logged.
 fn notify(version: &str) {
     let body = format!("已更新到 {version}，重启生效");
-    match Command::new("notify-send").args(["-a", "DSH", "DSH 已更新", body.as_str()]).status() {
+    let args = crate::native::notify_args("DSH 已更新", &body);
+    match Command::new("notify-send").args(args).status() {
         Ok(status) if status.success() => eprintln!("[runtime] 已通过系统通知告知用户：{body}"),
         Ok(status) => eprintln!("[runtime] notify-send 退出码 {status}"),
         Err(error) => eprintln!("[runtime] notify-send 不可用：{error}")
