@@ -338,7 +338,7 @@ mod tests {
         fs::write(&unrelated_file, "keep me").unwrap();
         fs::create_dir_all(&other_prefix).unwrap();
         fs::create_dir_all(&backup_dir).unwrap();
-        fs::write(&backup_dir.join("keep"), "user data").unwrap();
+        fs::write(backup_dir.join("keep"), "user data").unwrap();
         fs::write(&notes_file, "user notes").unwrap();
 
         clean_stale(&target);

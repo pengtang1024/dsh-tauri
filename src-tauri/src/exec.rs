@@ -373,7 +373,8 @@ mod tests {
         fn early_return(pid: i32) {
             let _registration = Registration::new(pid);
             assert!(is_registered(pid), "pid must be registered inside the scope");
-            return; // simulate an early `?` return
+            // Simulate an early `?` return: control leaves the scope here, so the
+            // guard must unregister the pid on drop even without a trailing statement.
         }
         assert!(!is_registered(pid), "pid must be clean before the test");
         early_return(pid);

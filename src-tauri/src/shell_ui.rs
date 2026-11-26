@@ -41,7 +41,7 @@ fn encode_state(state: &WindowState) -> String {
 fn geometry_is_sane(state: &WindowState) -> bool {
     [state.width, state.height]
         .into_iter()
-        .all(|value| value.is_finite() && value >= 1.0 && value <= 16384.0)
+        .all(|value| value.is_finite() && (1.0..=16384.0).contains(&value))
 }
 
 /// Parse remembered geometry. Empty, truncated, ill-typed or geometrically
