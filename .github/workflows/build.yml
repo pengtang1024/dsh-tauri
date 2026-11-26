@@ -42,6 +42,9 @@ jobs:
       - name: Check localized resources
         run: npm run check:locales
 
+      - name: Check documentation links
+        run: npm run check:links
+
       - name: Install the Tauri CLI
         run: npm ci
 
