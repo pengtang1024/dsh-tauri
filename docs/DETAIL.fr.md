@@ -41,7 +41,7 @@ Le script d'injection (`src-tauri/src/native.rs::SHIM`) s'exécute avant les scr
 
 | Couche | Emplacement | Responsabilité |
 | --- | --- | --- |
-| Supervision du service | `src-tauri/src/dsh.rs` | lancer `dsh web`, analyser l'URL depuis stdout, redémarrer après plantage, sortie par SIGTERM |
+| Supervision du service | `src-tauri/src/supervisor.rs` | lancer `dsh web`, analyser l'URL depuis stdout, redémarrer après plantage, sortie par SIGTERM |
 | Capacités natives | `src-tauri/src/native.rs` | sélecteur de répertoire, presse-papiers, notifications, liens externes, titre de fenêtre + script d'injection |
 | Enveloppe | `src-tauri/src/shell_ui.rs` | fenêtre, menu, barre d'état système, état de la fenêtre, page d'erreur, découpage géométrique |
 | Instance unique | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |
@@ -50,7 +50,7 @@ Le script d'injection (`src-tauri/src/native.rs::SHIM`) s'exécute avant les scr
 
 ```
 src-tauri/src/main.rs      Point d'entrée : builder Tauri, enregistrement des commandes, flux de démarrage et événements d'arrêt
-src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
+src-tauri/src/dsh.rs        运行时配置解析与信息上报
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
 src-tauri/src/update.rs     启动后后台 `npm view` 比对版本、自动装新、notify-send
@@ -75,7 +75,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | Sessions / espaces de travail / plugins | Web UI officielle, chargée depuis `dsh web` |
 | Sélecteur de répertoire, presse-papiers, notifications, liens externes | Script d'injection + commandes Tauri |
 | Titre de fenêtre, taille, barre d'état système, instance unique | `shell_ui.rs` / `single_instance.rs` |
-| Redémarrage automatique après plantage | `dsh.rs`, page d'erreur après 3 tentatives au maximum |
+| Redémarrage automatique après plantage | `supervisor.rs`, page d'erreur après 3 tentatives au maximum |
 | Installation / mise à jour de l'environnement d'exécution | Automatique (installation au premier lancement, vérification des mises à jour après le lancement) |
 | Progression du démarrage | splash interroge `runtime_status` : étape + temps écoulé |
 

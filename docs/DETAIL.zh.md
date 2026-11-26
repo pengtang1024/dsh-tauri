@@ -41,7 +41,7 @@ Tauri 只提供系统 WebView 和 Rust 后端，不带 Node 运行时。所以�
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 服务监督 | `src-tauri/src/dsh.rs` | spawn `dsh web`、从 stdout 解析 URL、崩溃重启、SIGTERM 退出 |
+| 服务监督 | `src-tauri/src/supervisor.rs` | spawn `dsh web`、从 stdout 解析 URL、崩溃重启、SIGTERM 退出 |
 | 原生能力 | `src-tauri/src/native.rs` | 目录选择、剪贴板、通知、外链、窗口标题 + 注入脚本 |
 | 外壳 | `src-tauri/src/shell_ui.rs` | 窗口、菜单、托盘、窗口状态、错误页、几何裁剪 |
 | 单实例 | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |
@@ -50,7 +50,7 @@ Tauri 只提供系统 WebView 和 Rust 后端，不带 Node 运行时。所以�
 
 ```
 src-tauri/src/main.rs      应用入口：Tauri builder、命令注册、启动流程与关停事件
-src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
+src-tauri/src/dsh.rs        运行时配置解析与信息上报
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
 src-tauri/src/update.rs     启动后后台 `npm view` 比对版本、自动装新、notify-send
@@ -75,7 +75,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | 会话 / 工作区 / 插件 | 官方 Web UI，加载自 `dsh web` |
 | 目录选择、剪贴板、通知、外链 | 注入脚本 + Tauri 命令 |
 | 窗口标题、尺寸、托盘、单实例 | `shell_ui.rs` / `single_instance.rs` |
-| 崩溃自动重启 | `dsh.rs`，最多 3 次后错误页 |
+| 崩溃自动重启 | `supervisor.rs`，最多 3 次后错误页 |
 | 运行时安装/更新 | 自动（首次启动安装，启动后自动检查更新） |
 | 启动进度 | splash 轮询 `runtime_status`：阶段 + 已用时 |
 

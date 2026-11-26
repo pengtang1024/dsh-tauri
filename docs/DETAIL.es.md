@@ -41,7 +41,7 @@ El script de inyección (`src-tauri/src/native.rs::SHIM`) se ejecuta antes de lo
 
 | Capa | Ubicación | Responsabilidad |
 | --- | --- | --- |
-| Supervisión del servicio | `src-tauri/src/dsh.rs` | lanzar `dsh web`, analizar la URL desde stdout, reiniciar tras fallo, salida con SIGTERM |
+| Supervisión del servicio | `src-tauri/src/supervisor.rs` | lanzar `dsh web`, analizar la URL desde stdout, reiniciar tras fallo, salida con SIGTERM |
 | Capacidades nativas | `src-tauri/src/native.rs` | selector de directorio, portapapeles, notificaciones, enlaces externos, título de ventana + script de inyección |
 | Envoltorio | `src-tauri/src/shell_ui.rs` | ventana, menú, bandeja, estado de ventana, página de error, recorte de geometría |
 | Instancia única | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |
@@ -50,7 +50,7 @@ El script de inyección (`src-tauri/src/native.rs::SHIM`) se ejecuta antes de lo
 
 ```
 src-tauri/src/main.rs      Punto de entrada: constructor de Tauri, registro de comandos, flujo de arranque y eventos de apagado
-src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
+src-tauri/src/dsh.rs        运行时配置解析与信息上报
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
 src-tauri/src/update.rs     启动后后台 `npm view` 比对版本、自动装新、notify-send
@@ -75,7 +75,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | Sesiones / espacios de trabajo / plugins | Web UI oficial, cargada desde `dsh web` |
 | Selector de directorio, portapapeles, notificaciones, enlaces externos | Script de inyección + comandos Tauri |
 | Título de ventana, tamaño, bandeja, instancia única | `shell_ui.rs` / `single_instance.rs` |
-| Reinicio automático tras fallo | `dsh.rs`, página de error tras un máximo de 3 intentos |
+| Reinicio automático tras fallo | `supervisor.rs`, página de error tras un máximo de 3 intentos |
 | Instalación/actualización del entorno de ejecución | Automática (instalación en el primer inicio, comprobación de actualizaciones tras el inicio) |
 | Progreso de arranque | splash sondea `runtime_status`: fase + tiempo transcurrido |
 

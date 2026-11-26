@@ -41,7 +41,7 @@ The injection script (`src-tauri/src/native.rs::SHIM`) runs before the page scri
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
-| Service supervision | `src-tauri/src/dsh.rs` | spawn `dsh web`, parse URL from stdout, crash restart, SIGTERM exit |
+| Service supervision | `src-tauri/src/supervisor.rs` | spawn `dsh web`, parse URL from stdout, crash restart, SIGTERM exit |
 | Native capabilities | `src-tauri/src/native.rs` | directory picker, clipboard, notification, external links, window title + injection script |
 | Shell | `src-tauri/src/shell_ui.rs` | window, menu, tray, window state, error page, geometry clipping |
 | Single instance | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |
@@ -50,7 +50,7 @@ The injection script (`src-tauri/src/native.rs::SHIM`) runs before the page scri
 
 ```
 src-tauri/src/main.rs      Application entry: Tauri builder, command registration, startup flow and shutdown events
-src-tauri/src/dsh.rs        服务生命周期：spawn、解析 URL、崩溃重启、优雅退出
+src-tauri/src/dsh.rs        运行时配置解析与信息上报
 src-tauri/src/runtime.rs    运行时定位（Env → checkout → 安装目录）+ 两个开关
 src-tauri/src/install.rs    npm 安装到暂存目录、带超时与失败信息
 src-tauri/src/update.rs     启动后后台 `npm view` 比对版本、自动装新、notify-send
@@ -75,7 +75,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | Sessions / workspaces / plugins | Official Web UI, loaded from `dsh web` |
 | Directory picker, clipboard, notification, external links | Injection script + Tauri commands |
 | Window title, size, tray, single instance | `shell_ui.rs` / `single_instance.rs` |
-| Automatic crash restart | `dsh.rs`, error page after at most 3 attempts |
+| Automatic crash restart | `supervisor.rs`, error page after at most 3 attempts |
 | Runtime install/update | Automatic (installed on first launch, update checked after launch) |
 | Startup progress | splash polls `runtime_status`: stage + elapsed time |
 
