@@ -2,8 +2,8 @@
 /**
  * Read-only guard: the seven shipped locale/*.json files must be valid JSON,
  * carry non-empty meta.title / meta.description / meta.detail strings, and
- * point meta.detail at an existing document. The on-disk language set must be
- * exactly zh/en/es/fr/de/ru/pt.
+ * point meta.detail at the matching-language document that exists. The on-disk
+ * language set must be exactly zh/en/es/fr/de/ru/pt.
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
  * Prints one PASS/FAIL per check with file:line (or path), then
@@ -84,10 +84,17 @@ if (listingOk) {
     }
 
     if (typeof values.detail === 'string' && values.detail.trim().length > 0) {
+      const language = name.slice(0, -'.json'.length);
+      const expectedDetail = 'docs/DETAIL.' + language + '.md';
       const detailPath = join(root, values.detail);
-      record(relativePath + ' meta.detail 文档存在',
+      const exists = existsSync(detailPath);
+      const matches = values.detail === expectedDetail;
+      const ok = exists && matches;
+      const note = ok ? '指向对应语言文档 ' + expectedDetail + ' 且存在'
+        : '期望 ' + expectedDetail + (exists ? '' : '（文档不存在）');
+      record(relativePath + ' meta.detail 指向对应语言文档且存在',
         relativePath + ':' + fieldLine(lines, 'detail') + ' → ' + values.detail,
-        existsSync(detailPath), existsSync(detailPath) ? '' : '文档不存在');
+        ok, note);
     }
   }
 }
