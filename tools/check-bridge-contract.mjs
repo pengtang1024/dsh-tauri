@@ -13,6 +13,8 @@
  * when the shell writes data-platform, when a SHIM injection point is
  * missing, when withGlobalTauri is not true, or when the shell injects a
  * dshDesktop global. Runtime absent => one SKIP line, exit 0.
+ * GUARD_CHECK_COUNT must match the number of emit() calls, enforced by the
+ * end-of-file self-check.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -29,8 +31,11 @@ const signal = /bridge|__DSH_|__ModuleLoader__|dshDesktop|dshOnboarding|boot rea
 const throwCall = /(?:throw\s+new\s+Error|new\s+Error)\s*\(/g;
 
 const FAILS = [];
-const emit = (status, name, evidence = '') =>
+let emittedChecks = 0;
+const emit = (status, name, evidence = '') => {
+  emittedChecks++;
   console.log(`${status} ${name}${evidence ? ' — ' + evidence : ''}`);
+};
 const rel = (p) => relative(root, p).split('\\').join('/');
 
 // Offline/CI: no installed runtime client packages, nothing to guard.
@@ -298,4 +303,8 @@ if (desktopHits === 0) emit('PASS', 'dshDesktop global not injected (documented 
 
 const checks = GUARD_CHECK_COUNT;
 console.log(`SUMMARY: ${checks} checks, ${FAILS.length} FAIL${FAILS.length === 1 ? '' : 'S'} (${files.length} runtime source files scanned)`);
+if (emittedChecks !== GUARD_CHECK_COUNT) {
+  console.error(`GUARD_CHECK_COUNT mismatch: constant=${GUARD_CHECK_COUNT}, actual emit calls=${emittedChecks}`);
+  process.exit(1);
+}
 process.exit(FAILS.length === 0 ? 0 : 1);
