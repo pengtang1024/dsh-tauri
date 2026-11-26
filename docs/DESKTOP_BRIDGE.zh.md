@@ -34,20 +34,20 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 
 ## 1. 注入 globals 契约表（当前 SHIM 提供了什么）
 
-来源：`src-tauri/src/native.rs:97-136`（SHIM 原文）；对应 Rust 命令 `native.rs:26-93`；`shell_info` 返回结构见 `src-tauri/src/dsh.rs:60-68`；注入点 `src-tauri/src/shell_ui.rs:183-184` 与 `:219`（splash 与 main 两个窗口均注入）。
+来源：`src-tauri/src/native.rs:233-273`（SHIM 原文）；对应 Rust 命令 `native.rs:95-240`；`shell_info` 返回结构见 `src-tauri/src/dsh.rs:71`；注入点 `src-tauri/src/shell_ui.rs:251` 与 `:286`（splash 与 main 两个窗口均注入）。
 
-所有方法统一经 `globalThis.__TAURI__.core.invoke(command, args)`（`native.rs:99-103`）；桥不存在时 Promise reject `Tauri bridge unavailable`。
+所有方法统一经 `globalThis.__TAURI__.core.invoke(command, args)`（`native.rs:236-238`）；桥不存在时 Promise reject `Tauri bridge unavailable`。
 
 | global | 方法 | invoke command | 参数（JS → Rust） | 返回（Rust → JS） |
 | --- | --- | --- | --- | --- |
-| `__DSH_TAURI__` | `protocolVersion` | — | — | 常量 `1`（`native.rs:105`） |
-| `__DSH_TAURI__` | `info()` | `shell_info` | 无 | `{ runtime, home, profile, desktopVersion }`（可能含 null 字段；`dsh.rs:60-68`） |
-| `__DSH_TAURI__` | `openExternal(url)` | `open_external` | `{ url: string }` | `void`；仅允许 http(s)/mailto（`native.rs:63-69`） |
-| `__DSH_TAURI__` | `notify(title, body)` | `notify` | `{ title, body }` | `void`（`native.rs:71-74`） |
-| `__DSH_TAURI__.clipboard` | `readText()` | `clipboard_read` | 无 | `string`（`wl-paste --no-newline`；`native.rs:43-46`） |
-| `__DSH_TAURI__.clipboard` | `writeText(text)` | `clipboard_write` | `{ text }` | `void`（`wl-copy`；`native.rs:48-60`） |
-| `__DSH_DIRECTORY_PICKER__` | `pick(options)` | `pick_directory` | `{ title: options?.title }` | `string \| null`，取消为 null（`native.rs:26-41`） |
-| （无 global，靠副作用） | `document.title` 同步 | `set_title` | `{ title }` | `void`；MutationObserver 观察 head，空标题忽略（`native.rs:117-135`） |
+| `__DSH_TAURI__` | `protocolVersion` | — | — | 常量 `1`（`native.rs:241`） |
+| `__DSH_TAURI__` | `info()` | `shell_info` | 无 | `{ runtime, home, profile, desktopVersion }`（可能含 null 字段；`dsh.rs:71`） |
+| `__DSH_TAURI__` | `openExternal(url)` | `open_external` | `{ url: string }` | `void`；仅允许 http(s)/mailto（`native.rs:159-166`） |
+| `__DSH_TAURI__` | `notify(title, body)` | `notify` | `{ title, body }` | `void`（`native.rs:198-201`） |
+| `__DSH_TAURI__.clipboard` | `readText()` | `clipboard_read` | 无 | `string`（`wl-paste --no-newline`；`native.rs:108-111`） |
+| `__DSH_TAURI__.clipboard` | `writeText(text)` | `clipboard_write` | `{ text }` | `void`（`wl-copy`；`native.rs:130-142`） |
+| `__DSH_DIRECTORY_PICKER__` | `pick(options)` | `pick_directory` | `{ title: options?.title }` | `string \| null`，取消为 null（`native.rs:95-106`） |
+| （无 global，靠副作用） | `document.title` 同步 | `set_title` | `{ title }` | `void`；MutationObserver 观察 head，空标题忽略（`native.rs:259-268`） |
 
 补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；它现在还校验 token URL 返回的 303 `Location` 必须仍在本地 origin（`redirectIsLocal`，缺失/外部 origin 即 FAIL 且不回显目标），防止 WebView 被导向外部站点后注入原生能力；对应 npm 单测 28 项（含重定向门禁 2 项）。与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
 
