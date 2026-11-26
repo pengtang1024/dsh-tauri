@@ -26,7 +26,7 @@ impl Default for WindowState {
 }
 
 fn state_path() -> PathBuf {
-    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
+    let home = crate::runtime::home_dir();
     home.join(".dsh").join("dsh-tauri-window-state.json")
 }
 
@@ -98,7 +98,7 @@ pub fn save_window_state(window: &WebviewWindow<Wry>) {
 /// Read `closeToTray` from the shared desktop preferences (default: true) so a
 /// window close keeps the server (and the session) alive in the tray.
 fn close_to_tray() -> bool {
-    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
+    let home = crate::runtime::home_dir();
     let path = home.join(".dsh").join("desktop-preferences.json");
     let Ok(text) = fs::read_to_string(path) else { return true };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { return true };
