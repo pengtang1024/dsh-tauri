@@ -58,10 +58,8 @@ jobs:
         run: npm run test:contract
 
       - name: Test the runtime contract
-        env:
-          DSH_HOME: ${{ runner.temp }}/dsh-probe-home
         timeout-minutes: 5
-        run: npm test
+        run: npm run test:clean
 
       - name: Test the Rust shell
         run: cargo test --manifest-path src-tauri/Cargo.toml
