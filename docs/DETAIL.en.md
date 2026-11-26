@@ -10,9 +10,9 @@ A desktop client for [DeepSeek Harness](https://github.com/deepseek-ai) built wi
 
 ### Core Goal
 
-**Goal:** Linux comes first — across distributions and versions — with the aim of the best compatibility, performance, and lowest resource use. Other platforms supported by the framework (Tauri 2) are, in principle, targeted for basic support as well, without in-depth adaptation or optimization.
+**Goal:** Linux comes first with deep support — across distributions and versions — with the aim of the best compatibility, performance, and lowest resource use; it is the only platform fully adapted and verified. Windows and macOS have basic desktop support — building and running is enough, with no in-depth adaptation or optimization. Mobile (iOS / Android) is not supported: the architecture depends on a local Node service plus the system WebView, which does not fit mobile sandbox and background restrictions.
 
-> **Current state (as-is):** Only Linux has been adapted and verified so far (the code currently relies on Linux-native commands `zenity` / `wl-clipboard` / `notify-send` and has only been verified on Linux + WebKitGTK 2.52; broad multi-distribution compatibility remains a goal, not a fully verified fact). Windows and macOS have not completed platform adaptation, and builds and runtime there are not guaranteed. Mobile platforms (iOS / Android) do not apply for now, because the architecture depends on a local Node service plus the system WebView.
+> **Current state (as-is):** Linux is the only platform fully adapted and verified (the code currently relies on Linux-native commands `zenity` / `wl-clipboard` / `notify-send` and has only been verified on Linux + WebKitGTK 2.52; broad multi-distribution compatibility remains a goal, not a fully verified fact). Windows and macOS have basic support — they build and run, but without in-depth adaptation or optimization and without full verification. Mobile (iOS / Android) is explicitly not supported, because the architecture depends on a local Node service plus the system WebView, which does not fit mobile sandbox and background restrictions.
 
 ### How this differs from "stuffing an Electron app into Tauri"
 
@@ -285,7 +285,7 @@ The window should show: session list, workspaces, model selector, and running se
 | Platform page embedded view (usage / recharge) | Opened in a browser; no native embedding implemented |
 | Old runtime takes up disk after update | The old tree is renamed `<runtime>.old-<pid>` and kept for the still-running service, **cleaned only on the next launch**; during that time it occupies about one extra copy of the runtime (about 1.2G) |
 | SIGKILL residue | When the shell is `SIGKILL`ed it has no time to reap child processes, so npm's `postinstall` grandchildren may briefly remain; normal exit (SIGTERM) is unaffected |
-| Windows / macOS / mobile platforms (all other platforms supported by Tauri) | **In principle targeted for basic support**, not a current core goal. Current state: only Linux has been adapted and verified; Windows and macOS have not completed platform adaptation, so builds and runtime there are not guaranteed; mobile does not apply for now due to the architecture of a local Node service plus the system WebView |
+| Windows / macOS / mobile (iOS / Android) | **Windows / macOS: basic support** — builds and runs, with no in-depth adaptation or optimization and no full verification; **mobile (iOS / Android): not supported**, because the architecture depends on a local Node service plus the system WebView, which does not fit mobile sandbox and background restrictions; only Linux is fully adapted and verified |
 | Wayland window position | Determined by the compositor; `position()` only affects X11-style compositors |
 | First-launch wait | Stage and elapsed time are visible, but there is no line-by-line npm output |
 

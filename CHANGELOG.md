@@ -8,7 +8,7 @@
 - **运行状态面板**：把「关于 dsh-tauri」扩成桌面端运行状态/诊断面板，体现这个可插拔 npm 运行时外壳独有的特性——运行时来源档位（Explicit/Checkout/Home/Resource）与版本（回答「跑的是哪一档、更新是否生效」）、自动更新状态（关闭 / 开启但不自动写入 / 开启且下次生效，只读判定、不触发检查）、`closeToTray` 关窗语义（托盘保活 vs 退出，保活一个 Node Host + 会话）、五个原生助手（zenity / wl-copy / wl-paste / notify-send / xdg-open）的只读 PATH 可用性、SHIM 协议版本 1 与「不实现 dshDesktop / 不设置 data-platform」的桥接事实；沿用 `zenity --info --no-markup` + `.spawn()` 非阻塞，零新依赖、零浸入 upstream，菜单仍单栏 DSH、托盘不变。
 - **重新加载修复**：改用 `WebviewWindow::reload()`（原生 WebView 重载）替代在 External URL WebView 上不可靠的 `eval("window.location.reload()")`，失败时输出带上下文的日志。
 - **Rust 单测**：重写菜单结构静态守卫（单栏工作流、关于簇、devtools 门控、reload 方式、关于面板格式与 zenity 安全参数），总数达 176 项。
-- **docs**：核心目标改为目标与现状分层表述——目标上 Linux 第一优先（优先支持各种发行版与不同版本，力求最佳兼容性、性能与最低资源消耗），框架支持平台原则上基础支持、不做深入适配与优化；如实注明当前仅 Linux 完成适配验证，Windows / macOS 尚未完成平台适配、不能保证构建与运行，移动端（iOS / Android）因依赖本地 Node 服务 + 系统 WebView 的架构模型暂不适用。
+- **docs**：核心目标统一为三档口径——Linux 深度支持、第一优先（优先支持各种发行版与不同版本，力求最佳兼容性、性能与最低资源消耗），是唯一完成适配与验证的平台；Windows / macOS 基础支持，能构建能运行，但不做深入适配与优化、未做全面验证；移动端（iOS / Android）不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
 ## 0.5.0
 
