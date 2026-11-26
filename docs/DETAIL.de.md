@@ -263,7 +263,7 @@ Im Fenster sollten zu sehen sein: Sitzungsliste, Arbeitsbereiche, Modellauswahl 
 - `dsh web` wird vom Mantel gestartet und `http://127.0.0.1:<port>/?token=…` aus stdout geparst; der erste Bildschirm erscheint innerhalb von 3–30 Sekunden (je nach Cache);
 - Authentifizierungskette: Token-URL → 303 + `dsh-auth-*` Cookie → `GET /` liefert das Client-HTML (`tools/probe-web.mjs`);
 - Im Fenster befindet sich die vollständige Web UI: Sitzungsliste, Arbeitsbereiche, Modellauswahl, Plugin-Seiten und laufende Sitzungsströme sind vorhanden;
-- Das Fenster benennt sich entsprechend `document.title` um; beim Schließen gilt die Einstellung „zum Tray schließen" oder „beenden"; die Größe wird beim Neustart wiederhergestellt;
+- Das Fenster benennt sich entsprechend `document.title` um; beim Schließen gilt die Einstellung „zum Tray schließen" oder „beenden" (die Einstellung ist das Feld `closeToTray` in `~/.dsh/desktop-preferences.json`: `true` = zum Tray schließen, `false` = beenden, Standard `true`); die Größe wird beim Neustart wiederhergestellt;
 - Ein zweiter Start fokussiert das bestehende Fenster und beendet sich, ohne einen zweiten Dienst zu starten;
 - Der Dienst startet nach dem Töten automatisch neu (maximal 3 Mal); bleibt er weiterhin fehlgeschlagen, wird eine lesbare Fehlerseite angezeigt;
 - Beim ersten Start ohne Laufzeitumgebung führt `npm install` automatisch eine Installation nach `~/.dsh/dsh-tauri/runtime` durch, und splash zeigt die aktuelle Phase und die verstrichene Zeit;

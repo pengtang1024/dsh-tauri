@@ -263,7 +263,7 @@ La ventana debe mostrar: lista de sesiones, espacios de trabajo, selector de mod
 - El envoltorio lanza `dsh web` y analiza `http://127.0.0.1:<port>/?token=…` desde stdout; la primera pantalla aparece en 3–30 segundos (según la caché);
 - Cadena de autenticación: URL con token → 303 + cookie `dsh-auth-*` → `GET /` devuelve el HTML del cliente (`tools/probe-web.mjs`);
 - La ventana contiene la Web UI completa: lista de sesiones, espacios de trabajo, selección de modelo, páginas de plugins y flujos de sesión en curso están presentes;
-- La ventana cambia de nombre con `document.title`; al cerrar se sigue la preferencia de «cerrar a la bandeja» o «salir»; el tamaño se restaura al reiniciar;
+- La ventana cambia de nombre con `document.title`; al cerrar se sigue la preferencia de «cerrar a la bandeja» o «salir» (la preferencia es el campo `closeToTray` en `~/.dsh/desktop-preferences.json`: `true` = cerrar a la bandeja, `false` = salir, por defecto `true`); el tamaño se restaura al reiniciar;
 - Un segundo inicio enfoca la ventana existente y sale, sin arrancar un segundo servicio;
 - El servicio se reinicia automáticamente tras ser matado (máximo 3 veces); si sigue fallando, se muestra una página de error legible;
 - En el primer inicio sin entorno de ejecución, `npm install` se ejecuta automáticamente en `~/.dsh/dsh-tauri/runtime` y splash muestra la fase actual y el tiempo transcurrido;

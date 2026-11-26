@@ -263,7 +263,7 @@ A janela deve mostrar: lista de sessões, espaços de trabalho, seletor de model
 - `dsh web` é iniciado pela casca e `http://127.0.0.1:<port>/?token=…` é analisado do stdout; a primeira tela aparece em 3–30 segundos (dependendo do cache);
 - Cadeia de autenticação: URL com token → 303 + cookie `dsh-auth-*` → `GET /` retorna o HTML do cliente (`tools/probe-web.mjs`);
 - A janela contém a Web UI completa: lista de sessões, espaços de trabalho, seleção de modelo, páginas de plugins e fluxos de sessão em andamento estão presentes;
-- A janela renomeia-se conforme `document.title`; ao fechar, respeita a preferência «fechar para a bandeja» ou «sair»; o tamanho é restaurado ao reiniciar;
+- A janela renomeia-se conforme `document.title`; ao fechar, respeita a preferência «fechar para a bandeja» ou «sair» (a preferência é o campo `closeToTray` em `~/.dsh/desktop-preferences.json`: `true` = fechar para a bandeja, `false` = sair, por padrão `true`); o tamanho é restaurado ao reiniciar;
 - Um segundo lançamento foca a janela existente e sai, sem iniciar um segundo serviço;
 - O serviço reinicia automaticamente após ser morto (no máximo 3 vezes); se ainda falhar, uma página de erro legível é exibida;
 - No primeiro lançamento sem ambiente de execução, `npm install` é executado automaticamente em `~/.dsh/dsh-tauri/runtime`, e o splash mostra o estágio atual e o tempo decorrido;

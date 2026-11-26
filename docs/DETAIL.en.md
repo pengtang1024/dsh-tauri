@@ -263,7 +263,7 @@ The window should show: session list, workspaces, model selector, and running se
 - `dsh web` is spawned by the shell and `http://127.0.0.1:<port>/?token=…` is parsed from stdout; the first screen appears within 3–30 seconds (depending on cache);
 - Authentication chain: token URL → 303 + `dsh-auth-*` cookie → `GET /` returns the client HTML (`tools/probe-web.mjs`);
 - The window contains the complete Web UI: session list, workspaces, model selection, plugin pages, and ongoing session streams are all present;
-- The window renames itself with `document.title`; closing follows the preference of "close to tray" or "quit"; size is restored on restart;
+- The window renames itself with `document.title`; closing follows the preference of "close to tray" or "quit" (the preference is the `closeToTray` field in `~/.dsh/desktop-preferences.json`: `true` = close to tray, `false` = quit, default `true`); size is restored on restart;
 - A second launch focuses the existing window and exits, without starting a second service;
 - The service restarts automatically after being killed (at most 3 times); if it still fails, a readable error page is shown;
 - On first launch with no runtime, `npm install` runs automatically into `~/.dsh/dsh-tauri/runtime`, and splash shows the current stage and elapsed time;

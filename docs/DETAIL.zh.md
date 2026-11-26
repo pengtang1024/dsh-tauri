@@ -263,7 +263,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "$(grep -ao 'http://127.0.0.1:[0-9]*/?t
 - `dsh web` 由外壳拉起，从 stdout 解析出 `http://127.0.0.1:<port>/?token=…`；首屏在 3–30 秒内出现（取决于缓存）；
 - 认证链路：token URL → 303 + `dsh-auth-*` cookie → `GET /` 返回客户端 HTML（`tools/probe-web.mjs`）；
 - 窗口里是完整 Web UI：会话列表、工作区、模型选择、插件页、正在进行的会话流都在；
-- 窗口会随 `document.title` 改名；关闭按偏好走「关到托盘」或「退出」；重启恢复尺寸；
+- 窗口会随 `document.title` 改名；关闭按偏好走「关到托盘」或「退出」（偏好在 `~/.dsh/desktop-preferences.json` 的 `closeToTray` 字段：`true`=关到托盘，`false`=退出，缺省 `true`）；重启恢复尺寸；
 - 第二次启动会聚焦已有窗口后退出，不会起第二个服务；
 - 服务被杀后自动重启（最多 3 次），仍失败则显示可读的错误页；
 - 首次启动没有运行时会自动 `npm install` 到 `~/.dsh/dsh-tauri/runtime`，splash 显示当前阶段与已用时；

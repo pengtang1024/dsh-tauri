@@ -263,7 +263,7 @@ La fenêtre doit afficher : liste des sessions, espaces de travail, sélecteur d
 - `dsh web` est lancé par l'enveloppe et `http://127.0.0.1:<port>/?token=…` est analysé depuis stdout ; le premier écran apparaît en 3–30 secondes (selon le cache) ;
 - Chaîne d'authentification : URL avec token → 303 + cookie `dsh-auth-*` → `GET /` renvoie le HTML du client (`tools/probe-web.mjs`) ;
 - La fenêtre contient la Web UI complète : liste des sessions, espaces de travail, sélection du modèle, pages de plugins et flux de sessions en cours sont présents ;
-- La fenêtre se renomme selon `document.title` ; à la fermeture, la préférence « fermer vers la barre d'état système » ou « quitter » est respectée ; la taille est restaurée au redémarrage ;
+- La fenêtre se renomme selon `document.title` ; à la fermeture, la préférence « fermer vers la barre d'état système » ou « quitter » est respectée (la préférence est le champ `closeToTray` dans `~/.dsh/desktop-preferences.json` : `true` = fermer vers la barre d'état système, `false` = quitter, par défaut `true`) ; la taille est restaurée au redémarrage ;
 - Un deuxième lancement donne le focus à la fenêtre existante puis quitte, sans démarrer un second service ;
 - Le service redémarre automatiquement après avoir été tué (3 fois au maximum) ; s'il échoue encore, une page d'erreur lisible est affichée ;
 - Au premier lancement sans environnement d'exécution, `npm install` s'exécute automatiquement dans `~/.dsh/dsh-tauri/runtime`, et splash affiche l'étape en cours et le temps écoulé ;
