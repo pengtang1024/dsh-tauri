@@ -72,7 +72,7 @@
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策
 - **clippy 警告归零**：清理 clippy 警告并把 lint 加入全量门禁，警告不再被忽略
-- **七语言本地化守卫**：新增本地化资源一致性守卫（36 项），校验七语言 JSON 合法、meta 字段非空且 detail 文档存在
+- **七语言本地化守卫**：新增本地化资源一致性守卫（36 项），校验七语言 JSON 合法、meta 字段非空且 detail 指向对应语言文档且存在（语言错配即 FAIL）
 - **文档链接守卫**：修复七语言详情页 LICENSE 死链并新增相对链接守卫（19 项，自动发现所有 md），死链即 FAIL
 - **CI 门禁扩充**：把本地化校验、链接守卫与 Rust lint 接入 CI，漂移即失败
 - **Tauri 命令注册完整性守卫**：只读扫描所有 `#[tauri::command]` 定义与 `main.rs` 的 `generate_handler!` 注册集合（8 项），漏注册即 FAIL；新增命令忘了接入不再到运行时才报「command not found」
