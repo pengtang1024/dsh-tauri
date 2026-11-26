@@ -48,8 +48,8 @@ CI 亦执行 `test:clean` / `test:unit` / `test:contract` 三项。
 + `check:locales` + `check:links` + `check:commands` + `test:unit` + `test:contract` 八层：`check:docs` 校验三处文档（README.md、CHANGELOG.md、
 `docs/DESKTOP_BRIDGE.zh.md`）里硬编码的 Rust 单测数与 `src-tauri/src/**/*.rs` 的实际
 `#[test]` 数量一致，漂移即 FAIL；`check:docs` 还校验 `tools/check-bridge-contract.mjs`
-里 `GUARD_CHECK_COUNT` 声明的契约守卫检查项数与 CHANGELOG.md 与 README.md 中「契约漂移守卫…静态检查」
-的项数一致（只读源码正则比对，不运行守卫），漂移即 FAIL；`check:docs` 还校验 README.md 与 CHANGELOG.md 声明的 npm 单测数与 `test/**/*.test.mjs` 中实际 `test()` 调用数一致、CHANGELOG.md 声明的 SHIM 契约断言数与 `test/shim-contract.test.mjs` 中实际 `assert.*` 调用数一致，漂移即 FAIL；`check:versions` 以 package.json 为基准核对
+里 `GUARD_CHECK_COUNT` 声明的契约守卫检查项数与 CHANGELOG.md、README.md 的「契约漂移守卫…静态检查」及
+`docs/DESKTOP_BRIDGE.zh.md` 的「契约守卫 N checks」项数一致（只读源码正则比对，不运行守卫），漂移即 FAIL；`check:docs` 还校验 README.md 与 CHANGELOG.md 声明的 npm 单测数与 `test/**/*.test.mjs` 中实际 `test()` 调用数一致、CHANGELOG.md 声明的 SHIM 契约断言数与 `test/shim-contract.test.mjs` 中实际 `assert.*` 调用数一致，漂移即 FAIL；`check:versions` 以 package.json 为基准核对
 `package-lock.json` 顶层与 `packages[""]` 两处、`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` `[package]` 的版本号，以及 `src-tauri/Cargo.lock` 中 `dsh-tauri` 包条目的版本号，漂移即 FAIL，
 已包含在 `verify:fast` 内；`check:locales` 只读扫描 `locale/*.json`，校验七语言（zh/en/es/fr/de/ru/pt）集合恰好齐全、每个 JSON 合法且 `meta.title` / `meta.description` / `meta.detail` 为非空字符串、`meta.detail` 指向的文档存在，漂移即 FAIL；`check:links` 只读扫描文档中的 Markdown 相对链接，校验每个目标路径存在，死链即 FAIL；`check:commands` 只读扫描 `src-tauri/src/**/*.rs` 的 `#[tauri::command] pub fn` 与 `main.rs` 的 `generate_handler!` 注册集合，漏注册即 FAIL；全程离线、不需要真运行时，runtime 缺失时
 `test:contract` 会自动 SKIP；但真正的
