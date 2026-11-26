@@ -35,6 +35,17 @@ fn session() -> &'static Mutex<Option<Session>> {
     SESSION.get_or_init(|| Mutex::new(None))
 }
 
+/// Take a mutex guard even when a previous holder panicked while holding it.
+///
+/// `progress::lock()` already recovers this way; the supervisor must not turn
+/// an unrelated thread's panic into a second panic when it only needs to read
+/// or clear the session.
+fn recover_lock<T>(
+    result: std::sync::LockResult<std::sync::MutexGuard<'_, T>>
+) -> std::sync::MutexGuard<'_, T> {
+    result.unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Claim the one-shot shutdown gate: `true` for the first caller, `false` for
 /// every later one. Pure over the supplied atomic so the idempotence guarantee
 /// is testable without spawning a server.
@@ -107,7 +118,7 @@ fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> 
         (_, None) => return Err(stop_failed_server(&mut child, "DSH stderr is unavailable")),
     };
     let pid = child.id();
-    *session().lock().unwrap() = Some(Session { child });
+    *recover_lock(session().lock()) = Some(Session { child });
     forward_stderr(stderr);
 
     let mut announced = false;
@@ -195,7 +206,7 @@ fn missing_session_reason(shutting_down: bool) -> &'static str {
 
 /// Describe how the server we started ended.
 fn exit_reason(pid: u32) -> String {
-    let status = session().lock().unwrap().take().map(|mut session| session.child.wait());
+    let status = recover_lock(session().lock()).take().map(|mut session| session.child.wait());
     match status {
         Some(Ok(status)) => match status.code() {
             Some(code) => format!("exit code {code}"),
@@ -225,7 +236,7 @@ pub fn shutdown() {
     // begin_shutdown() also blocks any helper a background updater tries to
     // spawn from here on, so no replacement npm can slip past this snapshot.
     crate::exec::begin_shutdown();
-    let mut guard = session().lock().unwrap();
+    let mut guard = recover_lock(session().lock());
     if let Some(session) = guard.as_mut() {
         let pid = session.child.id();
         // SIGTERM lets the server flush sessions; SIGKILL would leave WAL debris.
@@ -256,7 +267,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use super::{claim_shutdown, missing_session_reason, term_result_ok};
+    use super::{claim_shutdown, missing_session_reason, recover_lock, term_result_ok};
 
     #[test]
     fn claim_shutdown_is_idempotent() {
@@ -285,6 +296,25 @@ mod tests {
             thread.join().expect("claim thread panicked");
         }
         assert_eq!(winners.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recover_lock_survives_a_thread_panicking_while_holding_the_mutex() {
+        // A fresh mutex keeps the poisoning local to this test: the global
+        // SESSION is shared with production code and must stay unpoisoned.
+        let mutex = std::sync::Arc::new(std::sync::Mutex::new(42u32));
+        let poisoned_by = std::sync::Arc::clone(&mutex);
+        let holder = std::thread::spawn(move || {
+            let _guard = poisoned_by.lock().expect("fresh mutex is not poisoned yet");
+            panic!("poison the mutex while holding its guard");
+        });
+        assert!(holder.join().is_err(), "holder thread must panic");
+        assert!(mutex.is_poisoned(), "mutex must be poisoned before recovery");
+
+        // `.unwrap()` would panic here; recover_lock must yield the guard and
+        // the data the panicking thread left behind.
+        let guard = recover_lock(mutex.lock());
+        assert_eq!(*guard, 42, "guarded data survived the panic");
     }
 
     #[test]

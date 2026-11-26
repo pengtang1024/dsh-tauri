@@ -42,6 +42,7 @@
 - **标题同步启动期回退**：set_title 在主窗口尚未创建时回退到 splash 窗口，保证启动期标题同步仍生效
 - **Node 安装提示修正**：npm 缺失提示改为引导从官网或 nvm 获取 Node.js 24+，不再给出装不到新版 Node 的过时 apt 命令
 - **启动失败不留孤儿**：stdout/stderr 管道缺失时先终止已启动的服务再报错，不再靠 `drop(Child)` 把服务留在后台
+- **会话锁投毒恢复**：supervisor 的 3 处 session 加锁改用与 progress 一致的投毒恢复，持锁线程 panic 不再让启动/退出路径二次 panic
 
 **测试与质量**
 
@@ -49,7 +50,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 140 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 141 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 25 项
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策

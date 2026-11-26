@@ -166,7 +166,7 @@ docs/DEVELOPMENT.md         开发与验证手册
   正在跑的服务不受影响；
 - `DSH_TAURI_OFFLINE=1` 且本地无运行时，显示带手动命令的错误页而不是空白窗口；
 - 更新走 `<runtime>.new-<pid>` 暂存目录 + 原子替换，安装中断不会破坏已装好的运行时。
-- 三层自动验证：`npm test`（真运行时契约探针）、`npm run test:unit`（注入脚本、CLI、错误页与启动页单测，26 项）、`npm run test:contract`（上游桥接漂移守卫，13 项静态检查（含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查））；Rust 单测 140 项；CI 全部执行。
+- 三层自动验证：`npm test`（真运行时契约探针）、`npm run test:unit`（注入脚本、CLI、错误页与启动页单测，26 项）、`npm run test:contract`（上游桥接漂移守卫，13 项静态检查（含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查））；Rust 单测 141 项；CI 全部执行。
 
 ## 已知限制
 
