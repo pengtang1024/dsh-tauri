@@ -87,11 +87,25 @@ fn run(app: &AppHandle) -> Result<(), String> {
     }
 }
 
+/// Stop a server that was spawned but cannot be supervised (a pipe is missing).
+/// `drop(Child)` does not kill the process on Unix, so the explicit kill/wait is
+/// what keeps this startup failure from leaving the DSH service as an orphan.
+fn stop_failed_server(child: &mut Child, error: &str) -> String {
+    let _ = child.kill();
+    let _ = child.wait();
+    error.to_owned()
+}
+
 /// One server lifetime. `None` means the shell asked it to stop.
 fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> {
     let mut child = spawn_server(config)?;
-    let stdout = child.stdout.take().ok_or("DSH stdout is unavailable")?;
-    let stderr = child.stderr.take().ok_or("DSH stderr is unavailable")?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (stdout, stderr) = match (stdout, stderr) {
+        (Some(stdout), Some(stderr)) => (stdout, stderr),
+        (None, _) => return Err(stop_failed_server(&mut child, "DSH stdout is unavailable")),
+        (_, None) => return Err(stop_failed_server(&mut child, "DSH stderr is unavailable")),
+    };
     let pid = child.id();
     *session().lock().unwrap() = Some(Session { child });
     forward_stderr(stderr);

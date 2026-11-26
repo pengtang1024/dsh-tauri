@@ -41,6 +41,7 @@
 - **loopback 判定统一**：启动 URL 解析与 `DSH_TAURI_HOST` 校验共用同一 loopback 主机判定，消除双实现漂移
 - **标题同步启动期回退**：set_title 在主窗口尚未创建时回退到 splash 窗口，保证启动期标题同步仍生效
 - **Node 安装提示修正**：npm 缺失提示改为引导从官网或 nvm 获取 Node.js 24+，不再给出装不到新版 Node 的过时 apt 命令
+- **启动失败不留孤儿**：stdout/stderr 管道缺失时先终止已启动的服务再报错，不再靠 `drop(Child)` 把服务留在后台
 
 **测试与质量**
 
