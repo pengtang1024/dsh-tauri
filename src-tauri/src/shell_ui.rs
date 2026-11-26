@@ -9,6 +9,14 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
+/// Native "star this project" entry, shared by the window menu and the tray.
+/// Both handlers call `native::open_external` directly: it is a plain Rust call,
+/// so it works even before any window exists and needs no extra capability.
+const SUPPORT_ID: &str = "support";
+const HELP_MENU_LABEL: &str = "帮助";
+const SUPPORT_ITEM_LABEL: &str = "支持项目 ⭐";
+const SUPPORT_URL: &str = "https://github.com/pengtang1024/dsh-tauri";
+
 /// Window geometry remembered across launches.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowState {
@@ -132,7 +140,10 @@ pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let close = MenuItem::with_id(app, "close", "关闭窗口", true, Some("CmdOrCtrl+W"))?;
     let window = Submenu::with_items(app, "窗口", true, &[&minimize, &close])?;
 
-    Menu::with_items(app, &[&edit, &view, &window])
+    let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
+    let help = Submenu::with_items(app, HELP_MENU_LABEL, true, &[&support])?;
+
+    Menu::with_items(app, &[&edit, &view, &window, &help])
 }
 
 /// Which window owns the shared menu: the real UI once it exists, otherwise the
@@ -143,6 +154,12 @@ fn menu_window_label(main_exists: bool) -> &'static str {
 
 /// Wire menu actions; unknown ids are ignored so predefined items keep working.
 pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
+    if id == SUPPORT_ID {
+        if let Err(error) = crate::native::open_external(SUPPORT_URL.to_owned()) {
+            eprintln!("[dsh-tauri] cannot open the support page: {error}");
+        }
+        return;
+    }
     let label = menu_window_label(app.get_webview_window("main").is_some());
     let Some(window) = app.get_webview_window(label) else { return };
     match id {
@@ -170,8 +187,9 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
 /// Tray icon: left click restores the window, the menu offers show/quit.
 pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+    let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &support, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("DSH")
@@ -179,6 +197,11 @@ pub fn install_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
+            SUPPORT_ID => {
+                if let Err(error) = crate::native::open_external(SUPPORT_URL.to_owned()) {
+                    eprintln!("[dsh-tauri] cannot open the support page: {error}");
+                }
+            }
             "quit" => {
                 // app.exit() is a hard exit: no Destroyed event is guaranteed, so
                 // persist geometry here. Reuse the menu's label choice — the main
@@ -389,7 +412,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, urlencoding, WindowState};
+    use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, navigate_error_message, urlencoding, WindowState, HELP_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
 
     #[test]
     fn clamp_to_screen_large_screen_respects_floor_and_ceiling() {
@@ -422,6 +445,24 @@ mod tests {
     #[test]
     fn menu_targets_main_when_it_exists() {
         assert_eq!(menu_window_label(true), "main");
+    }
+
+    #[test]
+    fn support_entry_is_shared_by_menu_and_tray() {
+        // Both surfaces dispatch on the same id and label, so one handler
+        // constant keeps the window menu and the tray menu from drifting.
+        assert_eq!(SUPPORT_ID, "support");
+        assert_eq!(HELP_MENU_LABEL, "帮助");
+        assert!(SUPPORT_ITEM_LABEL.contains("支持项目"));
+        assert!(SUPPORT_ITEM_LABEL.contains('⭐'));
+    }
+
+    #[test]
+    fn support_url_is_a_https_repository_link() {
+        // native::open_external only allows http(s)/mailto; keep this a plain
+        // HTTPS GitHub URL so the star entry can never be rejected.
+        assert!(SUPPORT_URL.starts_with("https://github.com/"));
+        assert_eq!(SUPPORT_URL, "https://github.com/pengtang1024/dsh-tauri");
     }
 
     #[test]
