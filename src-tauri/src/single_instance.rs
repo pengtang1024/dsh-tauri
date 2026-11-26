@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
@@ -118,6 +119,12 @@ fn focus_label(main_exists: bool) -> &'static str {
 
 fn accept_forever(listener: UnixListener, app: AppHandle) {
     for stream in listener.incoming().flatten() {
+        // A client that connects but never sends a newline must not block this
+        // thread forever: the next focus request would never be handled.
+        // A read timeout (or any read error) just skips that one connection.
+        if stream.set_read_timeout(Some(Duration::from_secs(2))).is_err() {
+            continue;
+        }
         let mut line = String::new();
         if BufReader::new(stream).read_line(&mut line).is_err() {
             continue;
