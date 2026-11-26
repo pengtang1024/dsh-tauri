@@ -10,7 +10,9 @@ Un cliente de escritorio para [DeepSeek Harness](https://github.com/deepseek-ai)
 
 ### Objetivo principal
 
-La prioridad es Linux, en todas sus distribuciones y versiones, buscando la mejor compatibilidad, rendimiento y el menor consumo de recursos. Todas las plataformas compatibles con Tauri 2 (Windows, macOS, iOS, Android, etc.) solo reciben soporte básico: se pueden compilar y ejecutar, pero no se prevé una adaptación u optimización profunda.
+**Objetivo:** Linux es la prioridad, en todas sus distribuciones y versiones, buscando la mejor compatibilidad, rendimiento y el menor consumo de recursos. Las demás plataformas compatibles con el framework (Tauri 2) se plantean, en principio, con soporte básico, sin una adaptación u optimización profunda.
+
+> **Estado actual (tal cual):** por ahora solo Linux ha sido adaptado y verificado (el código depende de comandos nativos de Linux —`zenity` / `wl-clipboard` / `notify-send`— y solo se ha verificado en Linux + WebKitGTK 2.52; la compatibilidad con múltiples distribuciones sigue siendo un objetivo, no un hecho plenamente verificado). Windows y macOS aún no han completado su adaptación y no se garantiza que compilen o funcionen. Las plataformas móviles (iOS / Android) no se aplican por ahora, debido a que la arquitectura depende de un servicio Node local junto con el WebView del sistema.
 
 ### ¿En qué se diferencia de «meter una aplicación Electron dentro de Tauri»?
 
@@ -283,7 +285,7 @@ La ventana debe mostrar: lista de sesiones, espacios de trabajo, selector de mod
 | Vista incrustada de la página de la plataforma (uso / recarga) | Se abre en el navegador; no se ha implementado incrustación nativa |
 | El entorno de ejecución antiguo ocupa disco tras la actualización | El árbol antiguo se renombra `<runtime>.old-<pid>` y se conserva para el servicio aún en ejecución; **se limpia solo en el próximo inicio**; durante ese tiempo ocupa aproximadamente una copia adicional del entorno de ejecución (unos 1.2G) |
 | Residuos por SIGKILL | Cuando el envoltorio recibe `SIGKILL` no tiene tiempo de recoger los procesos hijos, por lo que los procesos nietos de `postinstall` de npm pueden permanecer brevemente; la salida normal (SIGTERM) no se ve afectada |
-| Windows / macOS / plataformas móviles (todas las demás plataformas compatibles con Tauri) | Solo soporte básico, sin adaptación ni optimización profundas; el código está escrito contra comandos nativos de Linux (zenity/wl-clipboard/notify-send), aún no se ha verificado por completo en todas las distribuciones y otras plataformas necesitan sustituirlos |
+| Windows / macOS / plataformas móviles (todas las demás plataformas compatibles con Tauri) | **En principio se plantea como soporte básico**, no es un objetivo central actual. Estado actual: solo Linux ha sido adaptado y verificado; Windows y macOS aún no han completado su adaptación y no se garantiza que compilen o funcionen; las plataformas móviles no se aplican por ahora debido a la arquitectura de servicio Node local + WebView del sistema |
 | Posición de la ventana en Wayland | La decide el compositor; `position()` solo afecta a compositores de estilo X11 |
 | Espera en el primer inicio | Se pueden ver la fase y el tiempo transcurrido, pero no hay salida de npm línea por línea |
 

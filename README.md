@@ -11,9 +11,9 @@
 
 ## 核心目标
 
-**本项目以 Linux 为第一优先**：优先支持 Linux 的各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好；Tauri 2 支持的所有平台（Windows、macOS、iOS、Android 等）仅提供基础支持，保证能构建、能运行，不做深入适配与优化。
+**目标层**：本项目以 Linux 为第一优先——优先支持 Linux 的各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好；框架（Tauri 2）支持的其它平台原则上也做基础支持，不做深入适配与优化。
 
-> 现状说明：当前代码仍依赖 Linux 原生命令（`zenity` / `wl-clipboard` / `notify-send`），且只在 Linux + WebKitGTK 2.52 上验证过。多发行版兼容是目标，不代表已全面验证。
+> **现状层（如实说明）**：目前仅 Linux 完成适配并验证（当前代码依赖 Linux 原生命令 `zenity` / `wl-clipboard` / `notify-send`，且只在 Linux + WebKitGTK 2.52 上验证过；多发行版兼容仍是目标，不代表已全面验证）。Windows / macOS 尚未完成平台适配，不能保证构建与运行；移动端（iOS / Android）因架构上依赖本地 Node 服务 + 系统 WebView，暂不适用。
 
 ![dsh-tauri 运行中的窗口](docs/images/shell.png)
 
@@ -184,7 +184,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | 平台页内嵌视图（用量 / 充值） | 走浏览器打开，未做原生内嵌 |
 | 更新后的旧运行时占盘 | 旧树改名 `<runtime>.old-<pid>` 保留给仍在跑的服务，**到下次启动才清理**；期间多占约一份运行时的空间（约 1.2G） |
 | SIGKILL 残留 | 外壳被 `SIGKILL` 时来不及收子进程，npm 的 `postinstall` 孙进程可能短暂残留；正常退出（SIGTERM）不受影响 |
-| Windows / macOS / 移动端（Tauri 支持的其它平台） | **仅基础支持、不做深入适配与优化**：不是项目核心目标。代码按 Linux 原生命令编写（zenity/wl-clipboard/notify-send），其它平台需要替换这几处 |
+| Windows / macOS / 移动端（Tauri 支持的其它平台） | **原则上做基础支持，非当前核心目标**。现状：仅 Linux 完成适配验证；Windows / macOS 尚未完成平台适配，不能保证构建与运行；移动端因依赖本地 Node 服务 + 系统 WebView 的架构模型，暂不适用 |
 | Wayland 窗口位置 | 由合成器决定，`position()` 只影响 X11 风格合成器 |
 | 首启动等待 | 能看阶段与已用时，但没有逐行 npm 输出 |
 
