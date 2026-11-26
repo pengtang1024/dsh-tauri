@@ -46,7 +46,7 @@ CI 亦执行 `test` / `test:unit` / `test:contract` 三项。
 `#[test]` 数量一致，漂移即 FAIL；`check:docs` 还校验 `tools/check-bridge-contract.mjs`
 里 `GUARD_CHECK_COUNT` 声明的契约守卫检查项数与 CHANGELOG.md 中「契约漂移守卫…静态检查」
 的项数一致（只读源码正则比对，不运行守卫），漂移即 FAIL；`check:versions` 以 package.json 为基准核对
-`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` `[package]` 的版本号，漂移即 FAIL，
+`package-lock.json` 顶层与 `packages[""]` 两处、`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` `[package]` 的版本号，漂移即 FAIL，
 已包含在 `verify:fast` 内；`check:locales` 只读扫描 `locale/*.json`，校验七语言（zh/en/es/fr/de/ru/pt）集合恰好齐全、每个 JSON 合法且 `meta.title` / `meta.description` / `meta.detail` 为非空字符串、`meta.detail` 指向的文档存在，漂移即 FAIL；`check:links` 只读扫描文档中的 Markdown 相对链接，校验每个目标路径存在，死链即 FAIL；全程离线、不需要真运行时，runtime 缺失时
 `test:contract` 会自动 SKIP；但真正的
 端到端确认仍须跑 `npm test`（需要运行时）。`npm run verify:all` 则在 `verify:fast`
