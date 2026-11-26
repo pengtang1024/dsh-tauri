@@ -54,6 +54,7 @@
 - **loose_url 取首个**：按出现顺序取 http/https 中最先出现的 URL，与探针解析一致，不再固定优先 http
 - **手动安装命令加引号**：手动安装命令对路径做 shell 单引号转义，含空格或单引号的路径可复制执行
 - **小屏窗口几何钳制顺序**：记忆尺寸的钳制改为「屏幕上限优先、最小尺寸兜底」，小屏上不再把窗口撑得比显示器还大
+- **单实例监听线程失败兜底**：监听线程 spawn 失败时记录日志、清理刚绑定的 socket 并 fail-open 继续启动，避免留下「死 socket」让后续启动静默退出
 
 **测试与质量**
 
@@ -72,6 +73,7 @@
 - **Tauri 命令注册完整性守卫**：只读扫描所有 `#[tauri::command]` 定义与 `main.rs` 的 `generate_handler!` 注册集合（8 项），漏注册即 FAIL；新增命令忘了接入不再到运行时才报「command not found」
 - **CI 覆盖一致性守卫**：校验 `verify:fast` 的每个叶子脚本都被 CI 执行（8 项），防止本地新增检查却漏接 CI
 - **check:docs 扩容至八项**：在原有测试数与契约数校验之外，增加 npm 单测数与 SHIM 契约断言数的文档声明校验，漂移即 FAIL
+- **文档守卫覆盖 DESKTOP_BRIDGE 契约检查数**：check-doc-counts 新增第三处契约守卫检查数校验（DESKTOP_BRIDGE.zh.md），与 README、CHANGELOG 一起防三处数字漂移
 
 **工程**
 
