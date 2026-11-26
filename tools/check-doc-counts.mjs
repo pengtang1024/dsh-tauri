@@ -11,7 +11,7 @@
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
  * Prints one PASS/FAIL per check with file:line and expected/actual, then
- * "SUMMARY: 6 checks, M FAILS". Exits 1 when any check fails, else 0.
+ * "SUMMARY: 7 checks, M FAILS". Exits 1 when any check fails, else 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -59,6 +59,7 @@ const checks = [
   { name: 'README.md npm 单测', file: 'README.md', pattern: /注入脚本、CLI、错误页与启动页单测，(\d+) 项/, expected: npmTestCount },
   { name: 'CHANGELOG.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'CHANGELOG.md', pattern: /契约漂移守卫.*?静态检查（(\d+) 项/, expected: guardCount },
   { name: 'README.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'README.md', pattern: /上游桥接漂移守卫，(\d+) 项静态检查/, expected: guardCount },
+  { name: 'CHANGELOG.md npm 单测', file: 'CHANGELOG.md', pattern: /npm 单测总数达 (\d+) 项/, expected: npmTestCount },
 ];
 
 const FAILS = [];
