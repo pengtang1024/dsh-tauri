@@ -33,7 +33,7 @@ Please include as much of the following as you can in your report:
 
 This repository is responsible for security issues in **the desktop shell itself**:
 
-- Locating, spawning, URL parsing and crash restart of the `dsh web` service in `src-tauri/src/dsh.rs`;
+- Locating, spawning, URL parsing and crash restart of the `dsh web` service in `src-tauri/src/supervisor.rs`;
 - Runtime discovery, installation, version comparison and atomic swap in `src-tauri/src/runtime.rs`, `install.rs`, `update.rs` and `swap.rs`;
 - Native commands and the injected script (`SHIM`) in `src-tauri/src/native.rs`, including clipboard, notifications, directory picker and external-link opening;
 - Window/tray, single-instance guard, child-process cleanup and startup-log parsing in `src-tauri/src/shell_ui.rs`, `single_instance.rs`, `exec.rs`, `banner.rs`, `progress.rs`, `version.rs` and `supervisor.rs`;

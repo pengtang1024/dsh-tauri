@@ -4,7 +4,7 @@
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 服务监督 | `src-tauri/src/dsh.rs` | spawn `dsh web`、从 stdout 解析 URL、崩溃重启、SIGTERM 退出 |
+| 服务监督 | `src-tauri/src/supervisor.rs` | spawn `dsh web`、从 stdout 解析 URL、崩溃重启、SIGTERM 退出 |
 | 原生能力 | `src-tauri/src/native.rs` | 目录选择、剪贴板、通知、外链、窗口标题 + 注入脚本 |
 | 外壳 | `src-tauri/src/shell_ui.rs` | 窗口、菜单、托盘、窗口状态、错误页、几何裁剪 |
 | 单实例 | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |

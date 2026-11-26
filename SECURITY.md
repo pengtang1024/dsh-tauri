@@ -33,7 +33,7 @@
 
 本仓库负责**桌面外壳本身**的安全问题：
 
-- `src-tauri/src/dsh.rs` 中 `dsh web` 服务的定位、spawn、URL 解析与崩溃重启；
+- `src-tauri/src/supervisor.rs` 中 `dsh web` 服务的定位、spawn、URL 解析与崩溃重启；
 - `src-tauri/src/runtime.rs`、`install.rs`、`update.rs`、`swap.rs` 的运行时定位、安装、版本比对与原子替换；
 - `src-tauri/src/native.rs` 中的原生命令与注入脚本（`SHIM`），包括剪贴板、系统通知、目录选择与外链打开；
 - `src-tauri/src/shell_ui.rs`、`single_instance.rs`、`exec.rs`、`banner.rs`、`progress.rs`、`version.rs`、`supervisor.rs` 的窗口 / 托盘、单实例守卫、子进程收尾与启动日志解析；
