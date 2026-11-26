@@ -108,6 +108,7 @@
 - **环境变量表补齐覆盖项**：README 与七语言详情页的变量表补上 `DSH_TAURI_HOST`（loopback 绑定主机）与 `DSH_TAURI_NPM`（npm 路径覆盖），与源码实际读取项一致
 - **deb 托盘依赖**：deb 的 depends 补上 `libayatana-appindicator3-1`，Tauri 的 depends 是覆盖语义、托盘 dlopen 的库需显式声明，避免干净系统安装后托盘静默不可用
 - **关到托盘偏好说明**：README 与七语言详情页补上 `~/.dsh/desktop-preferences.json` 的 `closeToTray` 字段位置与语义（`true` 关到托盘、`false` 退出、缺省 `true`），用户可按文档更改关窗行为
+- **文档源码地图与职责对齐**：源码地图补上入口 main.rs（14 模块）；架构/源码地图/能力表中的 spawn、URL 解析、崩溃重启、SIGTERM 职责从 dsh.rs 归位到实际的 supervisor.rs / banner.rs，README、七语言详情页、开发手册与安全策略中英一致
 
 ## 0.4.1
 
