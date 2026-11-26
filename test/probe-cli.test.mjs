@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { bannerUrl } from '../tools/banner-url.mjs';
+import { redirectIsLocal } from '../tools/probe-web.mjs';
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const probe = join(projectRoot, 'tools', 'probe-web.mjs');
@@ -54,6 +55,20 @@ test('bannerUrl accepts loopback hosts over http/https and rejects external host
   assert.equal(bannerUrl('dsh web: http://evil.example:44123/?token=abc'), null);
   assert.equal(bannerUrl('dsh web: http://EVIL.EXAMPLE:1234/?token=x'), null);
   assert.equal(bannerUrl('dsh web: ftp://127.0.0.1:44123/?token=abc'), null);
+});
+
+test('redirectIsLocal accepts a relative ./ location resolved against the token URL', () => {
+  const tokenUrl = 'http://127.0.0.1:44123/?token=abc';
+  assert.equal(redirectIsLocal('./', tokenUrl), true);
+  assert.equal(redirectIsLocal('./?step=2', tokenUrl), true);
+  assert.equal(redirectIsLocal('', tokenUrl), false);
+});
+
+test('redirectIsLocal accepts same-origin absolute URLs and rejects external origins', () => {
+  const tokenUrl = 'http://127.0.0.1:44123/?token=abc';
+  assert.equal(redirectIsLocal('http://127.0.0.1:44123/', tokenUrl), true);
+  assert.equal(redirectIsLocal('https://evil.example/?token=leak', tokenUrl), false);
+  assert.equal(redirectIsLocal('http://127.0.0.1:9999/', tokenUrl), false);
 });
 
 test('probe exits 2 when the runtime is missing', async () => {

@@ -49,7 +49,7 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 | `__DSH_DIRECTORY_PICKER__` | `pick(options)` | `pick_directory` | `{ title: options?.title }` | `string \| null`，取消为 null（`native.rs:26-41`） |
 | （无 global，靠副作用） | `document.title` 同步 | `set_title` | `{ title }` | `void`；MutationObserver 观察 head，空标题忽略（`native.rs:117-135`） |
 
-补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
+补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；它现在还校验 token URL 返回的 303 `Location` 必须仍在本地 origin（`redirectIsLocal`，缺失/外部 origin 即 FAIL 且不回显目标），防止 WebView 被导向外部站点后注入原生能力；对应 npm 单测 28 项（含重定向门禁 2 项）。与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
 
 ## 2. 上游 Web UI 实际探测／调用的桌面全局——逐项对照
 
