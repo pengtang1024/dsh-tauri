@@ -39,7 +39,7 @@ npm run build:check   # 链接真正的生产二进制（cfg(test) 之外的代�
 cookie + 客户端 HTML）；`npm run test:clean` 是 `npm test` 的**自清理包装**（每次自动建工作区内临时目录 `.dsh-probe-<pid>` 作为隔离的 `DSH_HOME`，结束时删除，不碰 `~/.dsh`）；`npm run test:unit` 测的是 **SHIM 注入脚本自身的行为**（纯 node 单测，
 不需要运行时）；`npm run test:contract` 是**上游升级后的契约漂移守卫**（只读扫描 `runtime/`，
 上游桥接缺失时 SKIP）。排查时先跑 `test:unit` 定位脚本自身问题，再用 `npm test` 端到端确认；
-CI 亦执行 `test` / `test:unit` / `test:contract` 三项。
+CI 亦执行 `test:clean` / `test:unit` / `test:contract` 三项。
 另有一条 `npm run check:ci` 只读守卫，校验 `verify:fast` 的各叶子脚本均在 CI 中执行，防止本地新增检查却漏接 CI。
 
 另有一条 `npm run verify:fast` 可一次跑完上述检查中的 `check` + `check:docs` + `check:versions`
@@ -69,7 +69,7 @@ npm install --prefix runtime @deepseek-ai/dsh
 ```
 
 探针需要一个**可写**的 `DSH_HOME`（默认 `~/.dsh`）；若该目录只读，用
-`DSH_HOME=/path/to/writable npm test` 覆盖；CI 已显式设为 runner 临时目录。
+`DSH_HOME=/path/to/writable npm test` 覆盖；CI 通过 `test:clean` 自动使用隔离临时 DSH_HOME（不再显式设 env）。
 
 ## 关键实现注意点
 
