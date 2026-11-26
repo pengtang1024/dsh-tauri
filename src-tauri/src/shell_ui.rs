@@ -212,17 +212,33 @@ fn show_main_window(app: &AppHandle<Wry>) {
     let _ = window.set_focus();
 }
 
+/// Clamp remembered geometry to the usable monitor area. Pure so the ordering
+/// of the screen ceiling and the minimum-size floor can be tested directly.
+///
+/// The original `.min(screen - margin).max(floor)` order let the floor override
+/// the screen ceiling: on an 800px-wide screen it produced 880px, wider than the
+/// monitor. Here the screen is the hard limit; the 880/600 floor applies only
+/// when the screen actually has room for it. `min_inner_size(880, 600)` in the
+/// window builders is deliberately left unchanged: on very small screens Tauri
+/// may still enforce that minimum, but our computed size must never actively
+/// exceed the monitor.
+fn clamp_to_screen(mut state: WindowState, screen_w: f64, screen_h: f64) -> WindowState {
+    let max_w = (screen_w - 40.0).max(1.0);
+    let max_h = (screen_h - 80.0).max(1.0);
+    state.width = if max_w >= 880.0 { state.width.clamp(880.0, max_w) } else { max_w };
+    state.height = if max_h >= 600.0 { state.height.clamp(600.0, max_h) } else { max_h };
+    state
+}
+
 /// Keep a remembered geometry usable: a monitor change must not park the window
 /// off-screen (Wayland ignores the position, but not the size).
-fn fit_to_screen<R: tauri::Runtime>(app: &AppHandle<R>, mut state: WindowState) -> WindowState {
+fn fit_to_screen<R: tauri::Runtime>(app: &AppHandle<R>, state: WindowState) -> WindowState {
     let Ok(Some(monitor)) = app.primary_monitor() else { return state };
     let scale = monitor.scale_factor();
     let size = monitor.size();
     let width = f64::from(size.width) / scale;
     let height = f64::from(size.height) / scale;
-    state.width = state.width.min(width - 40.0).max(880.0);
-    state.height = state.height.min(height - 80.0).max(600.0);
-    state
+    clamp_to_screen(state, width, height)
 }
 
 /// Splash shown while the server boots; it is replaced by the real UI.
@@ -365,7 +381,35 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_state, encode_state, geometry_is_sane, menu_window_label, urlencoding, WindowState};
+    use super::{clamp_to_screen, decode_state, encode_state, geometry_is_sane, menu_window_label, urlencoding, WindowState};
+
+    #[test]
+    fn clamp_to_screen_large_screen_respects_floor_and_ceiling() {
+        let state = WindowState { width: 1920.0, height: 1080.0, x: None, y: None, maximized: false };
+        let out = clamp_to_screen(state, 1920.0, 1080.0);
+        assert_eq!((out.width, out.height), (1880.0, 1000.0));
+
+        let small = WindowState { width: 400.0, height: 300.0, x: None, y: None, maximized: false };
+        let out = clamp_to_screen(small, 1920.0, 1080.0);
+        assert_eq!((out.width, out.height), (880.0, 600.0));
+    }
+
+    #[test]
+    fn clamp_to_screen_small_screen_never_exceeds_monitor() {
+        // The old .min(screen - margin).max(floor) order returned 880x600 here,
+        // larger than the 800x640 screen itself.
+        let state = WindowState { width: 1280.0, height: 840.0, x: Some(10), y: Some(20), maximized: true };
+        let out = clamp_to_screen(state, 800.0, 640.0);
+        assert_eq!((out.width, out.height), (760.0, 560.0));
+        assert_eq!((out.x, out.y, out.maximized), (Some(10), Some(20), true));
+    }
+
+    #[test]
+    fn clamp_to_screen_normal_screen_bounds_size() {
+        let state = WindowState { width: 1600.0, height: 1000.0, x: None, y: None, maximized: false };
+        let out = clamp_to_screen(state, 1280.0, 800.0);
+        assert_eq!((out.width, out.height), (1240.0, 720.0));
+    }
 
     #[test]
     fn menu_targets_main_when_it_exists() {
