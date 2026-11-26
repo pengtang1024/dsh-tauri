@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { bannerUrl } from '../tools/banner-url.mjs';
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const probe = join(projectRoot, 'tools', 'probe-web.mjs');
@@ -37,6 +38,20 @@ function runProbe(args, env = {}, guardMs = 4000) {
     });
   });
 }
+
+test('bannerUrl accepts loopback hosts over http/https and rejects external hosts and schemes', () => {
+  const accepted = [
+    'dsh web: http://127.0.0.1:44123/?token=abc',
+    'dsh web: http://localhost:44123/?token=abc',
+    'dsh web: https://127.0.0.1:44123/?token=abc',
+    'dsh web: http://[::1]:44123/?token=abc'
+  ];
+  for (const line of accepted) {
+    assert.equal(bannerUrl(line), line.slice('dsh web: '.length), line);
+  }
+  assert.equal(bannerUrl('dsh web: http://evil.example:44123/?token=abc'), null);
+  assert.equal(bannerUrl('dsh web: ftp://127.0.0.1:44123/?token=abc'), null);
+});
 
 test('probe exits 2 when the runtime is missing', async () => {
   const missing = join(tmpdir(), `dsh-probe-missing-${process.pid}-${Date.now()}`);

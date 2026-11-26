@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bannerUrl } from './banner-url.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const flag = (name, fallback) => {
@@ -103,10 +104,9 @@ let buffer = '';
 child.stdout.setEncoding('utf8');
 child.stdout.on('data', async (chunk) => {
   buffer += chunk;
-  const match = buffer.match(/dsh web:\s+(http:\/\/127\.0\.0\.1:\d+\/\?token=[\w-]+)/);
-  if (!match || child.__checked || finished) return;
+  const url = bannerUrl(buffer);
+  if (!url || child.__checked || finished) return;
   child.__checked = true;
-  const url = match[1];
   console.log(`url ${url}`);
 
   try {
