@@ -176,6 +176,8 @@ Constraints: do not kill the running service (the new version loads only on the 
 | --- | --- |
 | `DSH_TAURI_RUNTIME` | runtime directory (containing `node_modules`) |
 | `DSH_TAURI_NODE` | node executable |
+| `DSH_TAURI_HOST` | host the service binds to, loopback only (default `127.0.0.1`; `localhost` / `::1` allowed) |
+| `DSH_TAURI_NPM` | path to the npm executable (npm on PATH by default; used by automatic install/update and version detection) |
 | `DSH_TAURI_PROFILE` | which profile to launch (default `web`) |
 | `DSH_HOME` | data directory (default `~/.dsh`) |
 | `DSH_TAURI_URL` | for development: open an already-running loopback service directly (http(s) + 127.0.0.1/localhost/[::1] only), without spawning one |

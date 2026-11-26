@@ -176,6 +176,8 @@ Einschränkungen: den laufenden Dienst nicht töten (die neue Version wird erst 
 | --- | --- |
 | `DSH_TAURI_RUNTIME` | Verzeichnis der Laufzeitumgebung (enthält `node_modules`) |
 | `DSH_TAURI_NODE` | node-Executable |
+| `DSH_TAURI_HOST` | Host, an den der Dienst gebunden wird, nur Loopback (Standard `127.0.0.1`; `localhost` / `::1` erlaubt) |
+| `DSH_TAURI_NPM` | Pfad zur npm-Executable (standardmäßig npm aus dem PATH; wird von automatischer Installation/Aktualisierung und Versionserkennung genutzt) |
 | `DSH_TAURI_PROFILE` | welches Profil gestartet wird (Standard `web`) |
 | `DSH_HOME` | Datenverzeichnis (Standard `~/.dsh`) |
 | `DSH_TAURI_URL` | für die Entwicklung: einen bereits laufenden Loopback-Dienst direkt öffnen (nur http(s) + 127.0.0.1/localhost/[::1]), ohne einen zu starten |

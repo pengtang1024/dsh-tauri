@@ -176,6 +176,8 @@ runtime::ensure          定位失败 → 非离线 → install_fresh
 | --- | --- |
 | `DSH_TAURI_RUNTIME` | 运行时目录（含 `node_modules`） |
 | `DSH_TAURI_NODE` | node 可执行文件 |
+| `DSH_TAURI_HOST` | 服务绑定主机，仅接受 loopback（默认 `127.0.0.1`，可设 `localhost` / `::1`） |
+| `DSH_TAURI_NPM` | npm 可执行文件路径（默认 PATH 中的 npm；自动安装/更新与版本探测都用它） |
 | `DSH_TAURI_PROFILE` | 启动哪个 profile（默认 `web`） |
 | `DSH_HOME` | 数据目录（默认 `~/.dsh`） |
 | `DSH_TAURI_URL` | 开发用：直接打开已在运行的 loopback 服务（仅 http(s)+127.0.0.1/localhost/[::1]），不自己 spawn |

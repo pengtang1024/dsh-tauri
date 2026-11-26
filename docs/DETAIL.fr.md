@@ -176,6 +176,8 @@ Contraintes : ne pas tuer le service en cours d'exécution (la nouvelle version 
 | --- | --- |
 | `DSH_TAURI_RUNTIME` | répertoire de l'environnement d'exécution (contenant `node_modules`) |
 | `DSH_TAURI_NODE` | exécutable node |
+| `DSH_TAURI_HOST` | hôte auquel le service se lie, loopback uniquement (par défaut `127.0.0.1` ; `localhost` / `::1` autorisés) |
+| `DSH_TAURI_NPM` | chemin de l'exécutable npm (npm du PATH par défaut ; utilisé par l'installation/la mise à jour automatiques et la détection de version) |
 | `DSH_TAURI_PROFILE` | quel profil lancer (par défaut `web`) |
 | `DSH_HOME` | répertoire de données (par défaut `~/.dsh`) |
 | `DSH_TAURI_URL` | pour le développement : ouvrir directement un service loopback déjà en cours d'exécution (http(s) + 127.0.0.1/localhost/[::1] uniquement), sans en lancer un |
