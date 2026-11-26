@@ -10,7 +10,7 @@ Un client de bureau pour [DeepSeek Harness](https://github.com/deepseek-ai) cons
 
 ### Objectif principal
 
-La priorité va à Linux, toutes distributions et versions confondues, avec pour but la meilleure compatibilité, les meilleures performances et la consommation de ressources la plus faible. Windows et macOS ne bénéficient que d'un support de base ; aucune adaptation ou optimisation approfondie n'est prévue pour eux.
+La priorité va à Linux, toutes distributions et versions confondues, avec pour but la meilleure compatibilité, les meilleures performances et la consommation de ressources la plus faible. Toutes les plates-formes prises en charge par Tauri 2 (Windows, macOS, iOS, Android, etc.) ne bénéficient que d'un support de base : elles peuvent être compilées et exécutées, mais aucune adaptation ou optimisation approfondie n'est prévue.
 
 ### Quelle est la différence avec « fourrer une application Electron dans Tauri » ?
 
@@ -283,7 +283,7 @@ La fenêtre doit afficher : liste des sessions, espaces de travail, sélecteur d
 | Vue intégrée de la page de la plateforme (utilisation / recharge) | Ouverte dans le navigateur ; aucun intégration native n'est implémentée |
 | L'ancien environnement d'exécution occupe le disque après la mise à jour | L'ancien arbre est renommé `<runtime>.old-<pid>` et conservé pour le service encore en cours d'exécution, **nettoyé seulement au prochain lancement** ; pendant ce temps il occupe environ une copie supplémentaire de l'environnement d'exécution (environ 1.2G) |
 | Résidus après SIGKILL | Lorsque l'enveloppe reçoit `SIGKILL`, elle n'a pas le temps de récupérer les processus enfants, si bien que les processus petits-enfants `postinstall` de npm peuvent brièvement subsister ; une sortie normale (SIGTERM) n'est pas affectée |
-| Windows / macOS | Support de base uniquement, sans adaptation ni optimisation approfondies ; le code est écrit contre les commandes natives Linux (zenity/wl-clipboard/notify-send), n'a pas encore été entièrement validé sur toutes les distributions et les autres plates-formes nécessitent de les remplacer |
+| Windows / macOS / plates-formes mobiles (toutes les autres plates-formes prises en charge par Tauri) | Support de base uniquement, sans adaptation ni optimisation approfondies ; le code est écrit contre les commandes natives Linux (zenity/wl-clipboard/notify-send), n'a pas encore été entièrement validé sur toutes les distributions et les autres plates-formes nécessitent de les remplacer |
 | Position de la fenêtre sous Wayland | Déterminée par le compositeur ; `position()` n'affecte que les compositeurs de style X11 |
 | Attente au premier lancement | L'étape et le temps écoulé sont visibles, mais il n'y a pas de sortie npm ligne par ligne |
 

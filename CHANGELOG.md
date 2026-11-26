@@ -6,7 +6,7 @@
 - **开发者工具 release 可用**：tauri 依赖启用 `devtools` feature，移除 `#[cfg(debug_assertions)]` 门；菜单项始终显示、始终可打开，不再出现「看得见点不动」。
 - **重新加载修复**：改用 `WebviewWindow::reload()`（原生 WebView 重载）替代在 External URL WebView 上不可靠的 `eval("window.location.reload()")`，失败时输出带上下文的日志。
 - **Rust 单测**：新增 5 项菜单结构 / devtools 门控 / reload 方式静态守卫，总数达 171 项。
-- **docs**：明确项目核心目标为 Linux 优先（优先支持各种发行版与不同版本，力求最佳兼容性、性能与最低资源消耗），Windows/macOS 仅基本支持、不做深入适配。
+- **docs**：核心目标细化为 Linux 第一优先（优先支持各种发行版与不同版本，力求最佳兼容性、性能与最低资源消耗），Tauri 2 支持的所有平台（Windows、macOS、iOS、Android 等）均仅基础支持、不做深入适配与优化。
 
 ## 0.5.0
 

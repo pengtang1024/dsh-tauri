@@ -10,7 +10,7 @@ A desktop client for [DeepSeek Harness](https://github.com/deepseek-ai) built wi
 
 ### Core Goal
 
-Priority goes to Linux — across distributions and versions — with the aim of the best compatibility, performance, and lowest resource use. Windows and macOS are supported only at a basic level; no in-depth adaptation or optimization is planned for them.
+Priority goes to Linux — across distributions and versions — with the aim of the best compatibility, performance, and lowest resource use. All platforms supported by Tauri 2 (Windows, macOS, iOS, Android, etc.) receive basic support only — they can be built and run, but no in-depth adaptation or optimization is planned.
 
 ### How this differs from "stuffing an Electron app into Tauri"
 
@@ -283,7 +283,7 @@ The window should show: session list, workspaces, model selector, and running se
 | Platform page embedded view (usage / recharge) | Opened in a browser; no native embedding implemented |
 | Old runtime takes up disk after update | The old tree is renamed `<runtime>.old-<pid>` and kept for the still-running service, **cleaned only on the next launch**; during that time it occupies about one extra copy of the runtime (about 1.2G) |
 | SIGKILL residue | When the shell is `SIGKILL`ed it has no time to reap child processes, so npm's `postinstall` grandchildren may briefly remain; normal exit (SIGTERM) is unaffected |
-| Windows / macOS | Basic support only, with no in-depth adaptation or optimization; the code is written against Linux native commands (zenity/wl-clipboard/notify-send), has not been fully verified across distributions, and other platforms need these replaced |
+| Windows / macOS / mobile platforms (all other platforms supported by Tauri) | Basic support only, with no in-depth adaptation or optimization; the code is written against Linux native commands (zenity/wl-clipboard/notify-send), has not been fully verified across distributions, and other platforms need these replaced |
 | Wayland window position | Determined by the compositor; `position()` only affects X11-style compositors |
 | First-launch wait | Stage and elapsed time are visible, but there is no line-by-line npm output |
 
