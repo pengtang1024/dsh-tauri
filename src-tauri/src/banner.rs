@@ -8,23 +8,25 @@
 
 use tauri::Url;
 
+/// Whether `host` is a loopback address the shell's WebView may open.
+///
+/// Trim surrounding whitespace, strip IPv6 brackets, then compare
+/// case-insensitively against the shell's loopback set.
+pub(crate) fn is_loopback_host(host: &str) -> bool {
+    let normalized = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    matches!(normalized.as_str(), "127.0.0.1" | "localhost" | "::1")
+}
+
 /// Pull the URL out of a runtime output line.
 pub fn web_url(line: &str) -> Option<String> {
     let url = tagged_url(line).or_else(|| loose_url(line))?;
     let parsed = url.parse::<Url>().ok()?;
     let http_scheme = matches!(parsed.scheme(), "http" | "https");
-    let loopback_host = match parsed.host_str() {
-        Some(host) => {
-            // `host_str()` brackets IPv6 literals (`[::1]`); domains are
-            // normalized to lower case but normalize explicitly as a guard.
-            let host = host
-                .trim_start_matches('[')
-                .trim_end_matches(']')
-                .to_ascii_lowercase();
-            matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1")
-        }
-        None => false,
-    };
+    let loopback_host = parsed.host_str().is_some_and(is_loopback_host);
     (http_scheme && loopback_host).then_some(url)
 }
 
