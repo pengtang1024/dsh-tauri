@@ -8,12 +8,17 @@ use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// Group ids of the helpers currently running, so shutdown can stop every one.
 static RUNNING: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// Once the shell starts shutting down no new helper may be spawned: a background
+/// updater could otherwise start npm after `kill_running()` took its snapshot.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 /// A helper may spawn a background grandchild that keeps the pipe open after
 /// the helper itself exited. Waiting for EOF without a deadline would hang the
@@ -97,6 +102,11 @@ fn signal_group(pid: i32, signal: i32) {
     }
 }
 
+/// Pure shutdown gate: new helpers may spawn only before shutdown begins.
+fn can_spawn(shutting_down: bool) -> bool {
+    !shutting_down
+}
+
 /// Decide whether a timed-out helper still needs SIGKILL after the grace period.
 ///
 /// Once try_wait has reaped the child, its pid may already have been reused by
@@ -134,6 +144,14 @@ pub fn kill_running() {
     for pid in still_needs_kill(&pids, &live) {
         signal_group(pid, libc::SIGKILL);
     }
+}
+
+/// Mark the shell as shutting down and stop every helper already in flight.
+/// The flag is set before the kill snapshot so a concurrent `run()` cannot
+/// spawn a replacement helper that shutdown would never find.
+pub fn begin_shutdown() {
+    SHUTDOWN.store(true, Ordering::SeqCst);
+    kill_running();
 }
 
 /// Register a helper's process group as in flight.
@@ -175,6 +193,9 @@ impl Drop for Registration {
 /// `stdout`/`stderr` are drained on their own threads so a chatty helper can
 /// never fill a pipe and deadlock while we wait for the deadline.
 pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, String> {
+    if !can_spawn(SHUTDOWN.load(Ordering::SeqCst)) {
+        return Err("shell is shutting down".to_owned());
+    }
     // SAFETY: between fork and exec only async-signal-safe calls are made, and
     // `setsid` has no memory-safety preconditions.
     let mut child = unsafe {
@@ -248,7 +269,7 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
 #[cfg(test)]
 mod tests {
-    use super::{kill_running, lossy_output, run, should_force_kill, still_needs_kill, Registration, RUNNING};
+    use super::{can_spawn, kill_running, lossy_output, run, should_force_kill, still_needs_kill, Registration, RUNNING};
     use std::path::Path;
     use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
@@ -275,6 +296,18 @@ mod tests {
         let output = lossy_output(&bytes);
         assert!(!output.is_empty(), "invalid byte must not erase the whole output");
         assert_eq!(output, "hi\u{FFFD}ok");
+    }
+
+    /// A running shell may still spawn helpers.
+    #[test]
+    fn can_spawn_while_running() {
+        assert!(can_spawn(false), "helpers must spawn before shutdown begins");
+    }
+
+    /// Once shutdown begins, no helper may be spawned at all.
+    #[test]
+    fn cannot_spawn_while_shutting_down() {
+        assert!(!can_spawn(true), "shutdown must reject every new helper");
     }
 
     /// A child still alive after the grace period must be force-killed.

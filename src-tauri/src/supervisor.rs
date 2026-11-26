@@ -221,8 +221,10 @@ pub fn shutdown() {
     }
     SHUTTING_DOWN.store(true, Ordering::Relaxed);
     // An install or update may be running npm: stop it instead of leaving it
-    // behind with a half-written staging directory.
-    crate::exec::kill_running();
+    // behind with a half-written staging directory. The flag set by
+    // begin_shutdown() also blocks any helper a background updater tries to
+    // spawn from here on, so no replacement npm can slip past this snapshot.
+    crate::exec::begin_shutdown();
     let mut guard = session().lock().unwrap();
     if let Some(session) = guard.as_mut() {
         let pid = session.child.id();
