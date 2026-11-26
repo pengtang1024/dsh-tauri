@@ -21,7 +21,7 @@ npm test                                     # 拉起 dsh web，验证 303 + coo
 npm run test:clean                           # test 的自清理包装（隔离 DSH_HOME，用完删除）
 npm run test:unit                            # 注入脚本契约单测（node --test test/*.test.mjs，无需运行时）
 npm run test:contract                        # 上游桥接契约漂移守卫（只读扫描 runtime/，缺失时 SKIP）
-npm run verify:fast      # 离线快速门禁：语法检查 + 文档测试数校验 + npm 单测 + 桥接契约守卫
+npm run verify:fast      # 离线快速门禁：语法 + 文档数 + 版本 + 本地化 + 链接 + npm 单测 + 桥接契约守卫（共 7 项）
 npm run verify:all      # 全量离线门禁：verify:fast + lint:rust + build:check + Rust 单测
 npm run lint:rust                            # clippy --all-targets -- -D warnings（verify:all 已包含）
 npm run verify:e2e   # 全量离线门禁 + 真运行时探针（自动使用工作区临时 DSH_HOME 并清理）
