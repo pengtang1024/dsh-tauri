@@ -35,10 +35,20 @@ fn encode_state(state: &WindowState) -> String {
     serde_json::to_string_pretty(state).unwrap_or_default()
 }
 
-/// Parse remembered geometry. Empty, truncated or ill-typed input yields `None`;
-/// unknown extra fields are ignored by serde's default behaviour.
+/// Guard remembered geometry against values that would build an unusable window
+/// when no monitor is available to clamp them (e.g. headless or damaged state).
+/// `x`/`y` are `i32` and therefore always finite; only the size needs checking.
+fn geometry_is_sane(state: &WindowState) -> bool {
+    [state.width, state.height]
+        .into_iter()
+        .all(|value| value.is_finite() && value >= 1.0 && value <= 16384.0)
+}
+
+/// Parse remembered geometry. Empty, truncated, ill-typed or geometrically
+/// invalid input yields `None`; unknown extra fields are ignored by serde's
+/// default behaviour.
 fn decode_state(text: &str) -> Option<WindowState> {
-    serde_json::from_str(text).ok()
+    serde_json::from_str(text).ok().filter(geometry_is_sane)
 }
 
 pub fn load_window_state() -> WindowState {
@@ -355,7 +365,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_state, encode_state, menu_window_label, urlencoding, WindowState};
+    use super::{decode_state, encode_state, geometry_is_sane, menu_window_label, urlencoding, WindowState};
 
     #[test]
     fn menu_targets_main_when_it_exists() {
@@ -426,5 +436,38 @@ mod tests {
                 maximized: true
             })
         );
+    }
+
+    #[test]
+    fn geometry_is_sane_accepts_finite_sizes_with_any_position() {
+        assert!(geometry_is_sane(&WindowState {
+            width: 1280.0,
+            height: 840.0,
+            x: Some(-12),
+            y: Some(345),
+            maximized: false
+        }));
+        assert!(geometry_is_sane(&WindowState {
+            width: 1.0,
+            height: 16384.0,
+            x: None,
+            y: None,
+            maximized: true
+        }));
+    }
+
+    #[test]
+    fn geometry_is_sane_rejects_non_usable_sizes() {
+        let make = |width, height| WindowState {
+            width,
+            height,
+            x: None,
+            y: None,
+            maximized: false
+        };
+        assert!(!geometry_is_sane(&make(-1.0, 840.0)));
+        assert!(!geometry_is_sane(&make(1280.0, 0.0)));
+        assert!(!geometry_is_sane(&make(16385.0, 840.0)));
+        assert!(!geometry_is_sane(&make(f64::INFINITY, 840.0)));
     }
 }
