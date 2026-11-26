@@ -99,6 +99,7 @@
 - **npm 探测错误按类型诊断**：npm 版本探测失败时区分正在关停、路径不存在与执行权限等错误，不再一律误报「找不到 npm」；权限类错误提示核对 `DSH_TAURI_NPM` 路径
 - **验证口径同步七层改八层**：README 与开发手册的离线验证说明同步为八层（新增命令注册守卫），CI 探针描述与实际 workflow 对齐
 - **环境变量表补 loopback 约束**：README 与七语言详情页共 8 处的 `DSH_TAURI_URL` 说明同步为仅 http(s)+loopback（127.0.0.1 / localhost / [::1]），不再让人误以为可指向外部服务
+- **环境变量表补齐覆盖项**：README 与七语言详情页的变量表补上 `DSH_TAURI_HOST`（loopback 绑定主机）与 `DSH_TAURI_NPM`（npm 路径覆盖），与源码实际读取项一致
 
 ## 0.4.1
 
