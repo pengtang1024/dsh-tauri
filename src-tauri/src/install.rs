@@ -32,8 +32,22 @@ pub fn npm_available() -> Result<(), String> {
             outcome.timed_out,
             &program.display().to_string(),
         )),
-        Err(_) => Err(npm_missing())
+        Err(error) => Err(run_error_message(&error))
     }
+}
+
+/// Classify an `exec::run` failure instead of blaming a missing npm for every
+/// error: only a real `No such file or directory` means npm was not found.
+fn run_error_message(error: &str) -> String {
+    if error == "shell is shutting down" {
+        return "外壳正在关闭，npm 版本探测已取消".to_owned();
+    }
+    if error.contains("No such file or directory") {
+        return npm_missing();
+    }
+    format!(
+        "npm 版本探测未能执行：{error}\n\n请核对 DSH_TAURI_NPM 指向的 npm 路径与执行权限（例如 DSH_TAURI_NPM=/path/to/npm）后重试。"
+    )
 }
 
 /// A spawned npm that fails its version probe is a different problem from a
@@ -139,7 +153,7 @@ fn run_install(prefix: &str, spec: &str, manual: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_args, install_target, manual_command, npm_missing, shell_quote, version_probe_error};
+    use super::{install_args, install_target, manual_command, npm_missing, run_error_message, shell_quote, version_probe_error};
     use std::path::Path;
 
     #[test]
@@ -236,5 +250,28 @@ mod tests {
         assert!(message.contains("npm ERR! EACCES permission denied"));
         assert!(message.contains("npm"));
         assert!(!message.contains("找不到可用的 npm"), "must not claim npm is missing");
+    }
+
+    #[test]
+    fn run_error_message_shutdown_does_not_suggest_installing_node() {
+        let message = run_error_message("shell is shutting down");
+        assert_eq!(message, "外壳正在关闭，npm 版本探测已取消");
+        assert!(!message.contains("安装 Node"), "shutdown is not a missing npm");
+        assert!(!message.contains("找不到可用的 npm"));
+    }
+
+    #[test]
+    fn run_error_message_no_such_file_uses_npm_missing() {
+        let message = run_error_message("无法运行 /opt/bin/npm：No such file or directory (os error 2)");
+        assert_eq!(message, npm_missing(), "a real spawn ENOENT means npm is missing");
+    }
+
+    #[test]
+    fn run_error_message_permission_denied_keeps_error_and_path_hint() {
+        let message = run_error_message("无法运行 /opt/bin/npm：Permission denied (os error 13)");
+        assert!(message.contains("无法运行 /opt/bin/npm：Permission denied (os error 13)"));
+        assert!(message.contains("DSH_TAURI_NPM"));
+        assert!(!message.contains("安装 Node"), "permission denied is not a missing npm");
+        assert!(!message.contains("找不到可用的 npm"));
     }
 }
