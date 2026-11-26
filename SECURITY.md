@@ -58,7 +58,7 @@
 ## 已知边界
 
 - 回环 URL 里的 token 是访问 Web UI 的凭据，虽然只在本机监听，仍不要把含 `token=` 的完整 URL 贴进 issue、日志或对话。
-- 运行时目录里的 `node_modules` 是明文安装的 npm 包；请从 npm 官方源安装，不要替换成来源不明的包，`DSH_TAURI_RUNTIME` 指向的目录请自行保证可信。
+- 运行时目录里的 `node_modules` 是明文安装的 npm 包；请从 npm 官方源安装，不要替换成来源不明的包，`DSH_TAURI_RUNTIME` 指向的目录请自行保证可信。开发期 `runtime/package-lock.json` 使用 npm 镜像加速，每条依赖均带 sha512 完整性校验；生产自动安装走 npm 默认源。
 - 外壳会校验 `DSH_TAURI_URL` 只允许 loopback http(s) 地址，但仍不校验该服务返回的内容：开发时用该变量直连已在运行的服务，只应指向你信任的本地实例。
 - 自动更新会让下次启动加载新版本本体；企业或受限环境如不接受该行为，请显式设置 `DSH_TAURI_OFFLINE=1` 或 `DSH_TAURI_AUTO_UPDATE=0`。
 - 本项目目前按 Linux / Wayland + WebKitGTK 编写（zenity、wl-clipboard、notify-send），其它平台的原生命令行为未做安全审计。

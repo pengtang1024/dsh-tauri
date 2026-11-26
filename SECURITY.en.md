@@ -58,7 +58,7 @@ The root `package.json` declares only the dev dependency `@tauri-apps/cli`, and 
 ## Known boundaries
 
 - The token in the loopback URL is the credential for the Web UI. Even though the service listens only locally, do not paste a full URL containing `token=` into issues, logs or conversations.
-- The `node_modules` tree in the runtime directory is a plaintext npm installation. Install from the official npm registry, never a package of unknown origin, and make sure any directory you point `DSH_TAURI_RUNTIME` at is trustworthy.
+- The `node_modules` tree in the runtime directory is a plaintext npm installation. Install from the official npm registry, never a package of unknown origin, and make sure any directory you point `DSH_TAURI_RUNTIME` at is trustworthy. During development, `runtime/package-lock.json` uses an npm mirror for speed, with a sha512 integrity hash on every dependency; production auto-installation uses the default npm registry.
 - The shell validates that `DSH_TAURI_URL` is a loopback http(s) address, but does not further validate the content returned by that service: this development variable connects directly to an already-running service, so during development point it only at a trusted local instance.
 - Automatic updates make the next launch load a newer package. If that is unacceptable in a managed or restricted environment, set `DSH_TAURI_OFFLINE=1` or `DSH_TAURI_AUTO_UPDATE=0` explicitly.
 - The project is currently written for Linux / Wayland + WebKitGTK (zenity, wl-clipboard, notify-send); native-command behavior on other platforms has not been security-audited.
