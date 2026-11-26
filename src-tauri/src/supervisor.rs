@@ -8,7 +8,9 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use tauri::AppHandle;
 
@@ -18,6 +20,9 @@ use crate::progress::{self, Stage};
 
 /// How many times a crashed server is restarted before the error window shows.
 const MAX_RESTARTS: u32 = 3;
+/// How long the shell waits for the server's first URL before giving up.
+/// A live-but-silent server must not leave the splash on "Starting" forever.
+const WEB_URL_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct Session {
     child: Child
@@ -58,6 +63,48 @@ fn claim_shutdown(done: &AtomicBool) -> bool {
 /// the OS thread limit.
 fn spawn_failed_message(error: &std::io::Error) -> String {
     format!("无法启动服务监控线程：{error}")
+}
+
+/// Message the stdout reader thread sends back to the supervisor.
+enum UrlEvent {
+    /// The first loopback URL printed by the server.
+    Url(String),
+    /// stdout reached EOF (or the pipe broke) before a URL was seen.
+    Eof,
+}
+
+/// Outcome of waiting for the server's first URL.
+enum UrlWait {
+    Url(String),
+    /// stdout ended / channel disconnected: treat as a normal server exit.
+    Ended,
+    /// No URL within [`WEB_URL_TIMEOUT`]: the server is live but silent.
+    TimedOut,
+}
+
+/// Classify a `recv_timeout` result so the decision logic is testable without
+/// spawning a real server or waiting a minute.
+fn classify_url_wait(result: Result<UrlEvent, RecvTimeoutError>) -> UrlWait {
+    match result {
+        Ok(UrlEvent::Url(url)) => UrlWait::Url(url),
+        Ok(UrlEvent::Eof) | Err(RecvTimeoutError::Disconnected) => UrlWait::Ended,
+        Err(RecvTimeoutError::Timeout) => UrlWait::TimedOut,
+    }
+}
+
+/// Error-page text for a silent server. The timeout value comes from the same
+/// constant as the wait itself, and no URL is echoed back.
+fn startup_timeout_message() -> String {
+    format!(
+        "DSH 启动超时（{} 秒）：服务已启动但未在规定时间内提供访问地址。\n\n请在终端手动运行 `dsh web` 查看日志。",
+        WEB_URL_TIMEOUT.as_secs()
+    )
+}
+
+/// A timeout during shutdown is expected: the tray already owns the teardown
+/// and must not be followed by an error page.
+fn should_report_timeout(shutting_down: bool) -> bool {
+    !shutting_down
 }
 
 /// Start the server and keep it supervised on a background thread.
@@ -144,30 +191,58 @@ fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> 
         (None, _) => return Err(stop_failed_server(&mut child, "DSH stdout is unavailable")),
         (_, None) => return Err(stop_failed_server(&mut child, "DSH stderr is unavailable")),
     };
+    let rx = match spawn_url_reader(stdout) {
+        Ok(rx) => rx,
+        Err(error) => {
+            return Err(stop_failed_server(
+                &mut child,
+                &format!("cannot start stdout reader: {error}")
+            ))
+        }
+    };
     let pid = child.id();
     *recover_lock(session().lock()) = Some(Session { child });
     forward_stderr(stderr);
 
-    let mut announced = false;
-    for line in BufReader::new(stdout).lines() {
-        let Ok(line) = line else { break };
-        if !announced {
-            if let Some(url) = web_url(&line) {
-                announced = true;
-                eprintln!("[dsh-tauri] serving {url}");
-                progress::set(Stage::Ready, "服务已启动，正在打开界面");
-                crate::shell_ui::show_url(app, &url)?;
-                // The UI is up: look for a newer release in the background. It
-                // never touches this process, so the new version applies on the
-                // next launch.
-                crate::update::spawn_once(config.runtime.clone(), config.source);
-                continue;
+    // Watchdog: a live server that never prints its URL used to block the
+    // supervisor forever in BufReader::lines(), leaving the splash on Starting.
+    // Only the first URL is time-boxed; once announced the UI is up and the
+    // server may run for as long as it likes.
+    let url = match classify_url_wait(rx.recv_timeout(WEB_URL_TIMEOUT)) {
+        UrlWait::Url(url) => url,
+        UrlWait::Ended => return Ok(Some(exit_reason(pid))),
+        UrlWait::TimedOut => {
+            // During a user-initiated exit the tray already tore the server
+            // down: stay silent, no error page.
+            if !should_report_timeout(SHUTTING_DOWN.load(Ordering::Relaxed)) {
+                return Ok(None);
             }
+            // Kill through the handle we own, never a bare pid that could have
+            // been recycled by the time we signal it.
+            {
+                let mut guard = recover_lock(session().lock());
+                if let Some(session) = guard.as_mut() {
+                    let _ = session.child.kill();
+                    let _ = session.child.wait();
+                }
+                *guard = None;
+            }
+            let message = startup_timeout_message();
+            progress::fail(message.clone());
+            // No retry: a silent server would only repeat the same 60s hang.
+            return Err(message);
         }
-        if !line.trim().is_empty() {
-            eprintln!("[dsh] {line}");
-        }
-    }
+    };
+    eprintln!("[dsh-tauri] serving {url}");
+    progress::set(Stage::Ready, "服务已启动，正在打开界面");
+    crate::shell_ui::show_url(app, &url)?;
+    // The UI is up: look for a newer release in the background. It never
+    // touches this process, so the new version applies on the next launch.
+    crate::update::spawn_once(config.runtime.clone(), config.source);
+
+    // Supervise until stdout ends. The reader thread sends Eof only when no
+    // URL was seen; after a URL it just drops the sender, which also wakes us.
+    let _ = rx.recv();
     Ok(Some(exit_reason(pid)))
 }
 
@@ -218,6 +293,38 @@ fn forward_stderr(stderr: std::process::ChildStderr) {
             eprintln!("[dsh] {line}");
         }
     });
+}
+
+/// Read stdout on a dedicated thread so a live-but-silent server cannot block
+/// the supervisor forever. The first loopback URL (or EOF, if none) is sent
+/// back over the channel; every other line is logged exactly as before.
+fn spawn_url_reader(
+    stdout: std::process::ChildStdout
+) -> Result<mpsc::Receiver<UrlEvent>, std::io::Error> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("dsh-stdout-reader".to_owned())
+        .spawn(move || {
+            let mut sent_url = false;
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if !sent_url {
+                    if let Some(url) = web_url(&line) {
+                        sent_url = true;
+                        if tx.send(UrlEvent::Url(url)).is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                }
+                if !line.trim().is_empty() {
+                    eprintln!("[dsh] {line}");
+                }
+            }
+            if !sent_url {
+                let _ = tx.send(UrlEvent::Eof);
+            }
+        })?;
+    Ok(rx)
 }
 
 /// Pure fallback text when the session was already taken (e.g. by `shutdown`).
@@ -292,10 +399,13 @@ pub fn shutdown() {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc::RecvTimeoutError;
     use std::sync::Arc;
 
     use super::{
-        claim_shutdown, missing_session_reason, recover_lock, spawn_failed_message, term_result_ok
+        claim_shutdown, classify_url_wait, missing_session_reason, recover_lock,
+        should_report_timeout, spawn_failed_message, startup_timeout_message, term_result_ok,
+        UrlEvent, UrlWait, WEB_URL_TIMEOUT,
     };
 
     #[test]
@@ -375,5 +485,46 @@ mod tests {
         let message = spawn_failed_message(&error);
         assert!(message.starts_with("无法启动服务监控线程"), "unexpected message: {message}");
         assert!(message.contains("resource temporarily unavailable"), "error lost: {message}");
+    }
+
+    #[test]
+    fn startup_timeout_message_has_seconds_and_manual_command_without_url() {
+        let message = startup_timeout_message();
+        assert!(
+            message.contains("60 秒"),
+            "timeout seconds missing or drifted: {message}"
+        );
+        assert_eq!(WEB_URL_TIMEOUT.as_secs(), 60, "constant must match message");
+        assert!(message.contains("dsh web"), "manual command missing: {message}");
+        assert!(
+            !message.contains("http://") && !message.contains("https://"),
+            "error page must not echo the full URL: {message}"
+        );
+    }
+
+    #[test]
+    fn classify_url_wait_distinguishes_url_end_and_timeout() {
+        assert!(matches!(
+            classify_url_wait(Ok(UrlEvent::Url("http://127.0.0.1:1234".to_owned()))),
+            UrlWait::Url(url) if url == "http://127.0.0.1:1234"
+        ));
+        assert!(matches!(
+            classify_url_wait(Ok(UrlEvent::Eof)),
+            UrlWait::Ended
+        ));
+        assert!(matches!(
+            classify_url_wait(Err(RecvTimeoutError::Disconnected)),
+            UrlWait::Ended
+        ));
+        assert!(matches!(
+            classify_url_wait(Err(RecvTimeoutError::Timeout)),
+            UrlWait::TimedOut
+        ));
+    }
+
+    #[test]
+    fn should_report_timeout_is_false_while_shutting_down() {
+        assert!(!should_report_timeout(true), "no error page during shutdown");
+        assert!(should_report_timeout(false), "report a real startup timeout");
     }
 }
