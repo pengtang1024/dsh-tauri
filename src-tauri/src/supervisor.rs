@@ -168,6 +168,17 @@ fn forward_stderr(stderr: std::process::ChildStderr) {
     });
 }
 
+/// Pure fallback text when the session was already taken (e.g. by `shutdown`).
+/// `{pid}` is expanded by `exit_reason`; during shutdown the reason is explicit
+/// instead of looking like an unexpected exit.
+fn missing_session_reason(shutting_down: bool) -> &'static str {
+    if shutting_down {
+        "服务已按关闭流程停止（会话已被 shutdown 取走）"
+    } else {
+        "process {pid} ended"
+    }
+}
+
 /// Describe how the server we started ended.
 fn exit_reason(pid: u32) -> String {
     let status = session().lock().unwrap().take().map(|mut session| session.child.wait());
@@ -176,7 +187,8 @@ fn exit_reason(pid: u32) -> String {
             Some(code) => format!("exit code {code}"),
             None => "terminated by a signal".to_owned()
         },
-        _ => format!("process {pid} ended")
+        _ => missing_session_reason(SHUTTING_DOWN.load(Ordering::Relaxed))
+            .replace("{pid}", &pid.to_string())
     }
 }
 
@@ -228,7 +240,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use super::{claim_shutdown, term_result_ok};
+    use super::{claim_shutdown, missing_session_reason, term_result_ok};
 
     #[test]
     fn claim_shutdown_is_idempotent() {
@@ -267,5 +279,18 @@ mod tests {
     #[test]
     fn term_result_not_ok_on_failure() {
         assert!(!term_result_ok(-1));
+    }
+
+    #[test]
+    fn missing_session_reason_during_shutdown_is_explicit() {
+        let reason = missing_session_reason(true);
+        assert!(reason.contains("关闭"), "unexpected reason: {reason}");
+        assert!(!reason.contains("{pid}"), "placeholder must not leak: {reason}");
+    }
+
+    #[test]
+    fn missing_session_reason_outside_shutdown_keeps_original_text() {
+        assert_eq!(missing_session_reason(false), "process {pid} ended");
+        assert_eq!(missing_session_reason(false).replace("{pid}", "42"), "process 42 ended");
     }
 }
