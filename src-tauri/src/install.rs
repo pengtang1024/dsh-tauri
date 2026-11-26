@@ -78,9 +78,19 @@ fn install_args(prefix: &str, target: &str) -> [String; 7] {
     ]
 }
 
+/// POSIX single-quote a value for a copy-pasteable shell command line:
+/// wrap it in `'…'`, and write each internal `'` as the close-escape-reopen
+/// sequence `'\''` so the shell passes it through literally.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// The command a user can run by hand when an install fails.
 fn manual_command(manual: &Path, target: &str) -> String {
-    format!("npm install --prefix {} {target}", manual.display())
+    format!(
+        "npm install --prefix {} {target}",
+        shell_quote(&manual.display().to_string())
+    )
 }
 
 /// Install `spec` (usually `latest`) into `dir` atomically.
@@ -129,7 +139,7 @@ fn run_install(prefix: &str, spec: &str, manual: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_args, install_target, manual_command, npm_missing, version_probe_error};
+    use super::{install_args, install_target, manual_command, npm_missing, shell_quote, version_probe_error};
     use std::path::Path;
 
     #[test]
@@ -163,10 +173,29 @@ mod tests {
         let command = manual_command(manual, &target);
         assert_eq!(
             command,
-            "npm install --prefix /home/user/.dsh/dsh-tauri/runtime @deepseek-ai/dsh@1.2.3"
+            "npm install --prefix '/home/user/.dsh/dsh-tauri/runtime' @deepseek-ai/dsh@1.2.3"
         );
         assert!(command.contains("/home/user/.dsh/dsh-tauri/runtime"));
         assert!(command.contains("@deepseek-ai/dsh@1.2.3"));
+    }
+
+    #[test]
+    fn shell_quote_wraps_spaces_and_escapes_single_quotes() {
+        assert_eq!(shell_quote("/home/My User/x"), "'/home/My User/x'");
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(
+            shell_quote("/home/O'Brien/My Runtime"),
+            "'/home/O'\\''Brien/My Runtime'"
+        );
+        let target = install_target("latest");
+        assert_eq!(
+            manual_command(Path::new("/home/My User/.dsh/dsh-tauri/runtime"), &target),
+            "npm install --prefix '/home/My User/.dsh/dsh-tauri/runtime' @deepseek-ai/dsh@latest"
+        );
+        assert_eq!(
+            manual_command(Path::new("/home/O'Brien/runtime"), &target),
+            "npm install --prefix '/home/O'\\''Brien/runtime' @deepseek-ai/dsh@latest"
+        );
     }
 
     #[test]
