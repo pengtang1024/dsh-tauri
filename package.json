@@ -1,6 +1,6 @@
 {
   "name": "dsh-tauri",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "private": true,
   "description": "Tauri 2 desktop shell for DeepSeek Harness: runs the official @deepseek-ai/dsh npm package (dsh web, a plain Node service) and provides the window, tray, menu, native capabilities and first-launch automatic runtime install with background updates through Rust and the system WebView — no Electron or DSH Desktop installation required.",
   "license": "MIT",
