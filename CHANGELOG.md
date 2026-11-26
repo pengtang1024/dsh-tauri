@@ -13,6 +13,7 @@
 - **环境变量开关大小写不敏感**：离线等开关统一忽略大小写与首尾空白，避免写成 `TRUE` / `Off` 时离线意图失效
 - **probe banner URL 解析**：探针解析 banner URL 与外壳对齐，只接受 http/https + loopback（127.0.0.1 / localhost / [::1]），匹配大小写不敏感，并用 URL 类复核挡住畸形地址
 - **DSH_TAURI_URL 开发钩子门禁**：开发用的 URL 覆盖入口也要求 loopback http(s) 地址，与 banner 解析共用 `is_safe_app_url` 判定，外部地址直接忽略并给出提示
+- **安全文档过期表述纠正**：SECURITY 中英文文档改掉「外壳不校验 `DSH_TAURI_URL`」的旧说法，如实写明现只允许 loopback http(s) 地址，但仍不校验该服务返回的内容
 
 **运行时健壮性**
 
@@ -97,6 +98,7 @@
 - **SHIM 断言数校验纳入守卫**：文档守卫按实际 `assert.*` 调用数校验 SHIM 契约断言声明（21 项），并修正守卫正则对 camelCase 断言名的漏匹配
 - **npm 探测错误按类型诊断**：npm 版本探测失败时区分正在关停、路径不存在与执行权限等错误，不再一律误报「找不到 npm」；权限类错误提示核对 `DSH_TAURI_NPM` 路径
 - **验证口径同步七层改八层**：README 与开发手册的离线验证说明同步为八层（新增命令注册守卫），CI 探针描述与实际 workflow 对齐
+- **环境变量表补 loopback 约束**：README 与七语言详情页共 8 处的 `DSH_TAURI_URL` 说明同步为仅 http(s)+loopback（127.0.0.1 / localhost / [::1]），不再让人误以为可指向外部服务
 
 ## 0.4.1
 
