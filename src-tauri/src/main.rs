@@ -52,7 +52,7 @@ fn main() {
             // spawning one (`DSH_TAURI_URL="http://127.0.0.1:PORT/?token=…"`).
             if let Ok(url) = std::env::var("DSH_TAURI_URL") {
                 match url.parse::<tauri::Url>() {
-                    Ok(parsed) => {
+                    Ok(parsed) if banner::is_safe_app_url(&parsed) => {
                         if let Err(error) = shell_ui::build_main_window(&handle, parsed) {
                             let message = window_error_message("无法打开开发 URL 指定的窗口", &error);
                             if let Err(error) = shell_ui::show_error(&handle, &message) {
@@ -61,6 +61,9 @@ fn main() {
                         }
                         return Ok(());
                     }
+                    Ok(_) => eprintln!(
+                        "[dsh-tauri] ignoring DSH_TAURI_URL: 只接受 loopback http(s) 地址"
+                    ),
                     Err(error) => eprintln!("[dsh-tauri] ignoring DSH_TAURI_URL: {error}")
                 }
             }

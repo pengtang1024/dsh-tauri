@@ -127,7 +127,7 @@ grep -rn 'dshDesktop' runtime/node_modules/@deepseek-ai/dsh-client-ui-{file-drag
 grep -o 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Ciz7DZxv.js | sort -u
 ```
 
-> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 147 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
+> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 149 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
 
 ## 5. dshDesktop v1 决策：明确不实现
 

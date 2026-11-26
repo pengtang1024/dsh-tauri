@@ -21,13 +21,20 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     matches!(normalized.as_str(), "127.0.0.1" | "localhost" | "::1")
 }
 
+/// Whether the shell may open `url` in a WebView with native capabilities.
+///
+/// Only http(s) on a loopback host is allowed; the shell always launches
+/// `dsh` with `--host 127.0.0.1`, so every other origin is out of bounds.
+pub(crate) fn is_safe_app_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some_and(is_loopback_host)
+}
+
 /// Pull the URL out of a runtime output line.
 pub fn web_url(line: &str) -> Option<String> {
     let url = tagged_url(line).or_else(|| loose_url(line))?;
     let parsed = url.parse::<Url>().ok()?;
-    let http_scheme = matches!(parsed.scheme(), "http" | "https");
-    let loopback_host = parsed.host_str().is_some_and(is_loopback_host);
-    (http_scheme && loopback_host).then_some(url)
+    is_safe_app_url(&parsed).then_some(url)
 }
 
 fn tagged_url(line: &str) -> Option<String> {
@@ -53,7 +60,28 @@ fn loose_url(line: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tagged_url, web_url};
+    use super::{is_safe_app_url, tagged_url, web_url};
+    use tauri::Url;
+
+    #[test]
+    fn accepts_loopback_http_and_https_urls() {
+        for raw in [
+            "http://127.0.0.1:44123/?token=abc",
+            "https://localhost:44123/?token=abc",
+            "http://[::1]:44123/?token=abc",
+        ] {
+            let parsed = raw.parse::<Url>().expect("valid loopback URL");
+            assert!(is_safe_app_url(&parsed), "{raw} should be safe");
+        }
+    }
+
+    #[test]
+    fn rejects_external_hosts_and_non_http_schemes() {
+        for raw in ["http://evil.example/x", "ftp://127.0.0.1:9/"] {
+            let parsed = raw.parse::<Url>().expect("valid URL");
+            assert!(!is_safe_app_url(&parsed), "{raw} should be rejected");
+        }
+    }
 
     #[test]
     fn reads_the_url_from_the_runtime_banner() {
