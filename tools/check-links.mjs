@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Read-only guard: every Markdown relative link in the scanned docs must point
- * to an existing path. Scans README.md, CHANGELOG.md, CONTRIBUTING.md,
- * docs/DETAIL.*.md, docs/DEVELOPMENT.md and docs/DESKTOP_BRIDGE.zh.md.
+ * to an existing path. Scans all .md files under the repository root and docs/.
  * http(s):, mailto: and pure #anchor links are skipped; a relative link with
  * a fragment/query is checked by its path portion. The destination is decoded
  * and resolved against the directory of the document that contains it.
@@ -16,11 +15,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const docs = ['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md'];
-for (const name of readdirSync(join(root, 'docs')).sort()) {
-  if (/^DETAIL\..*\.md$/.test(name)) docs.push('docs/' + name);
-}
-docs.push('docs/DEVELOPMENT.md', 'docs/DESKTOP_BRIDGE.zh.md');
+const docs = [...new Set([
+  ...readdirSync(root).filter((name) => /\.md$/.test(name)).sort().map((name) => name),
+  ...readdirSync(join(root, 'docs')).filter((name) => /\.md$/.test(name)).sort().map((name) => 'docs/' + name),
+])];
 
 const linkPattern = /\[[^\]]*\]\(([^)]*)\)/g;
 let checks = 0;
