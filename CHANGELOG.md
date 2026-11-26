@@ -15,6 +15,7 @@
 - **DSH_TAURI_URL 开发钩子门禁**：开发用的 URL 覆盖入口也要求 loopback http(s) 地址，与 banner 解析共用 `is_safe_app_url` 判定，外部地址直接忽略并给出提示
 - **安全文档过期表述纠正**：SECURITY 中英文文档改掉「外壳不校验 `DSH_TAURI_URL`」的旧说法，如实写明现只允许 loopback http(s) 地址，但仍不校验该服务返回的内容
 - **安全文档镜像源澄清**：SECURITY 中英文文档说明开发期 lockfile 走 npm 镜像加速、每条依赖均带 sha512 完整性校验，生产自动安装仍走 npm 默认源，与「从官方源安装」的建议并不矛盾
+- **认证重定向门禁**：真探针校验认证 303 的 Location 解析后必须保持本地 origin，相对路径与同源绝对 URL 合法，缺失或跨 origin 即 FAIL；失败文案不回显完整目标以防 token 泄露
 
 **运行时健壮性**
 
