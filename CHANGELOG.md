@@ -35,6 +35,7 @@
 - **退出幂等化**：shutdown 增加一次性门闩，托盘退出与 Exit 事件重复触发时只拆一次服务，避免对已回收进程重复发信号
 - **kill_running 竞态收敛**：宽限期后只强杀仍登记的进程组，已退出并注销的 PID 不再被误杀
 - **助手输出非 UTF-8 容错**：按字节读取并做无损替换，无效字节不再吞掉整段诊断输出
+- **助手输出采集有界化**：drain 改用 mpsc + recv_timeout（200ms）替代无条件 join，孙进程继承管道不再挂住外壳，超时记日志并继续
 - **窗口几何加载校验**：加载记忆的窗口尺寸时校验有效性，异常数值回退默认几何，避免无显示器可用时恢复出不可用窗口
 - **progress 错误终态**：把 Error 设为终态，阻止后台更新线程迟到的阶段推进覆盖错误状态
 - **loopback 判定统一**：启动 URL 解析与 `DSH_TAURI_HOST` 校验共用同一 loopback 主机判定，消除双实现漂移
@@ -47,7 +48,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 135 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数
+- **Rust 单测扩容**：从 17 个增至 136 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 25 项
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策

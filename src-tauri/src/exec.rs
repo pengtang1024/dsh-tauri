@@ -8,12 +8,17 @@ use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::Mutex;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// Group ids of the helpers currently running, so shutdown can stop every one.
 static RUNNING: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// A helper may spawn a background grandchild that keeps the pipe open after
+/// the helper itself exited. Waiting for EOF without a deadline would hang the
+/// shell, so output collection is bounded to this window.
+const DRAIN_WAIT: Duration = Duration::from_millis(200);
 
 /// Result of a finished (or killed) helper process.
 pub struct Outcome {
@@ -47,14 +52,40 @@ fn lossy_output(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Option<JoinHandle<String>> {
+/// Drain a pipe on its own thread and report the captured text through a
+/// channel. The reader may block forever if a grandchild inherits the pipe, so
+/// the caller waits with a deadline (`recv_timeout`) instead of joining.
+fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Option<Receiver<String>> {
     pipe.map(|mut pipe| {
+        let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
             let _ = pipe.read_to_end(&mut bytes);
-            lossy_output(&bytes)
-        })
+            // Ignore send failure: the caller may have already timed out.
+            let _ = tx.send(lossy_output(&bytes));
+        });
+        rx
     })
+}
+
+/// Collect one drained stream within the bounded wait window. A timeout means
+/// a grandchild still holds the pipe; log it and use the empty string rather
+/// than blocking the shell indefinitely.
+fn collect(receiver: Option<Receiver<String>>, stream: &str) -> String {
+    match receiver {
+        None => String::new(),
+        Some(rx) => match rx.recv_timeout(DRAIN_WAIT) {
+            Ok(text) => text,
+            Err(RecvTimeoutError::Timeout) => {
+                eprintln!("[runtime] 采集 {stream} 超时（{DRAIN_WAIT:?}），孙进程可能仍持有管道；跳过");
+                String::new()
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                eprintln!("[runtime] 采集 {stream} 的管道已断开，输出为空");
+                String::new()
+            }
+        }
+    }
 }
 
 /// Signal the helper's whole process group: it is its own session leader.
@@ -209,8 +240,8 @@ pub fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Outcome, 
 
     Ok(Outcome {
         status,
-        stdout: stdout.and_then(|handle| handle.join().ok()).unwrap_or_default(),
-        stderr: stderr.and_then(|handle| handle.join().ok()).unwrap_or_default(),
+        stdout: collect(stdout, "stdout"),
+        stderr: collect(stderr, "stderr"),
         timed_out
     })
 }
@@ -360,5 +391,30 @@ mod tests {
             assert!(is_registered(pid), "pid must be registered while the guard lives");
         }
         assert!(!is_registered(pid), "pid must be cleared after the guard drops");
+    }
+
+    /// A background grandchild that inherits the pipe must not hold the shell
+    /// hostage: the old unconditional join() waited for its exit (seconds),
+    /// while the bounded recv_timeout returns after DRAIN_WAIT with no output.
+    #[test]
+    fn grandchild_holding_pipe_does_not_hang_run() {
+        let _serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let started = Instant::now();
+        // The shell exits right after `echo`, but `sleep 5` keeps the inherited
+        // stdout/stderr pipes open far beyond the bounded drain window.
+        let outcome = run(
+            Path::new("/bin/sh"),
+            &["-c", "(sleep 5 &) ; echo done"],
+            Duration::from_secs(60),
+        )
+        .expect("helper started");
+        assert!(outcome.status.success(), "the shell itself exited 0");
+        assert!(!outcome.timed_out, "the deadline was not reached");
+        assert_eq!(outcome.stdout, "", "drain timed out and yielded empty output");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "run() must not wait for the background grandchild, took {:?}",
+            started.elapsed()
+        );
     }
 }
