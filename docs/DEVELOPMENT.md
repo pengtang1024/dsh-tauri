@@ -97,7 +97,8 @@ npm install --prefix runtime @deepseek-ai/dsh
 - **根因**：WebKitGTK 2.52.6 + Wayland + `GtkBox` 的下层限制。wry 把 WebView 用 `pack_start(expand=true, fill=true)` 塞进 `GtkBox`，`WebView::set_bounds` 对该容器是 no-op；`set_bounds` 不触发绘制缓冲高度重分配，于是绘制面高度冻结。冷启动不触发 `Resized` 事件，`content_bottom` 恒停在 650。
 - **已证伪方案 A**（Resized 分支 `sync_webview_surface` → `with_webview` → `queue_resize`，并在 Cargo.toml 加 `gtk 0.18`）：实机证明冷启动根本不进入 Resized 分支，`queue_resize` 从不执行；仅在真实 resize 时生效，且只修横向，纵向 `content_bottom` 仍停在 650；连续 5 次 resize 没有自激。该方案相关未提交代码已全部还原，不在 HEAD 中。
 - **另一个已证伪方向**：早先在 Resized 分支调 `set_size` 想自激触发重绘，结果造成 resize 自激崩溃（反馈环），已放弃。
-- **后续方向**：探索导航/加载完成后做一次有界的 `size_allocate`（只在内容就绪后触发一次，避免反馈环），或等待 WebKitGTK / wry 上游修复；在确认实机证据前不要再提交「已修复」的结论。
+- **已证伪方案 B**（导航/加载完成后做一次有界 `size_allocate`，task-384 只读论证）：虽能从 `with_webview` 拿到 GTK 父容器 allocation（`tauri-2.12.7/src/webview/webview_window.rs:1994` 的 `default_vbox`；GTK `WidgetExt` 的 `parent/allocation/size_allocate` 齐备），用 GTK allocation 作尺寸源也不会重演 `set_size` 的物理/逻辑自激，但两个必要条件都不满足——WebView 以 `pack_start(expand=true, fill=true)` 铺满 `GtkBox`（wry `mod.rs:698-702`），窗口放大后父容器 allocation 已是新尺寸，同尺寸 `size_allocate` 极可能是 no-op，而更强的 `queue_resize` 已实机证明纵向无效（`content_bottom` 恒停 650）；冷启动最大化恢复是 `build()` 之后才 async maximize（`shell_ui.rs:471-474`），导航完成点父容器尺寸未定，一次性调用覆盖不到最终 configure。上游 wry#1727 仍 open 无 workaround，tauri PR#16507 针对 child webview 不适用。**别再尝试此方向**。
+- **后续方向**：外壳侧无可靠修法，等待 WebKitGTK / wry 上游修复 `GtkBox` + Wayland 下绘制缓冲的尺寸重分配；在确认实机证据前不要再提交「已修复」的结论。
 
 诊断时的关键观测量：WebView 绘制面的 `content_bottom` 与原生窗口几何是否同步、`Resized` 事件是否真的到达、连续 resize 是否自激——不要只看单次截图。
 
