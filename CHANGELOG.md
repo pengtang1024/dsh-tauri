@@ -1,5 +1,8 @@
 # 更新记录
 
+## 未发布
+
+- **修复：目录选择报「Command pick_directory not allowed by ACL」**：tauri 2.12.7 把 `WebviewUrl::External` 加载的回环页面（`http://127.0.0.1:<port>`）判为 remote origin，`on_message` 因此对本项目的应用自定义命令一律走 ACL（`webview/mod.rs:2080` 的条件在 2.10.2 里没有 `|| !is_local`，2.12 才收紧）；而 `capabilities/default.json` 既没有 `remote.urls`、也没有任何应用权限，应用清单为空，于是 SHIM 的应用命令连同启动页的 `runtime_status` 全部被拒——目录选择是上游唯一真正消费的桌面能力，直接不可用。修法零依赖、零侵入：新增 `src-tauri/permissions/dsh-shims.toml`（8 条应用权限，每条只放行一个命令），`capabilities/default.json` 补 `remote.urls`（`http://127.0.0.1:*` / `http://localhost:*`，端口随进程变化）并列出这 8 条权限，`local` 保持放行供 splash 使用；未改 SHIM 行为、未新增 crate。守卫：`tools/check-capabilities.mjs` 从 4 项扩到 13 项，新增「SHIM/启动页调用的每个命令都被 capabilities 放行」「capability 引用的应用权限存在」「有 External 窗口就必须声明 `remote.urls`」「`remote.urls` 覆盖默认回环主机」「URL pattern 不含方括号（urlpattern 会在 `generate_context!` 编译期 panic）」「`local` 未被关闭」——反向验证：删掉 `allow-pick-directory` 后守卫 FAIL 并点名 `pick_directory`，恢复即绿。实测（独立实例 + 私有 `XDG_RUNTIME_DIR`，不碰用户实例）：同一页面对 `DSH_TAURI_URL` 注入的 `__DSH_DIRECTORY_PICKER__.pick()`，修复前返回 `pick_directory not allowed. Plugin not found`，修复后弹出 GTK 目录框（标题「ACL 实测目录」，进程 `zenity --file-selection --directory`），且无 ACL 报错。
 ## 0.7.1（2026-11-27）
 
 - **修复：长时间运行后黑带 / 右侧被裁的真因（WebKit fd 泄漏）**：定位到 Linux/Wayland 下窗口持续使用后出现的「底部/右侧纯黑、页面按旧宽度布局（侧栏常驻展开态、内容被右缘切断）」根因不在 GTK 尺寸分配，而在 WebKitGTK 的 NVIDIA DMABUF 渲染路径——它每个重绘帧泄漏一个 `anon_inode:sync_file` fd，WebKit 子进程继承的 `RLIMIT_NOFILE` 软上限 1024 被耗尽后日志出现 `Failed to allocate shared memory buffer`，新的绘制缓冲分配失败，绘制面停在旧尺寸（实机：用户实例 web 进程 1022/1024、949 个 sync_file）。外壳侧两处修复（均在 GTK/WebKit 初始化前生效，WebKit 子进程继承）：① 启动时把软上限提升到硬上限（目标 65536，绝不超硬上限、不降低已有的更高软上限，失败只记日志不 panic）；② 检测到 NVIDIA 驱动时关闭 WebKit 的 DMABUF 渲染器（`WEBKIT_DISABLE_DMABUF_RENDERER=1`，尊重用户已显式设置的值）以从源头停止泄漏——A/B 实测：30 次 resize 后 fd 由 111 涨到 485、sync_file 414 个；关闭后同样 30 次 resize 保持 33 个 fd、0 个 sync_file。实机验收：修复版 web 进程软上限 65536，把 fd 推到 1719（远超旧上限 1024）后执行「最小化期间 MoveResize 到 788x836 → 恢复」仍是紧凑布局（侧栏分隔线 x≈55，旧版为 279）、底部纯黑 0 行；可见状态 1340x646→788x836 单步与连续 5 次均 0 黑行、无自激、进程存活。
@@ -100,7 +103,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 190 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 194 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策

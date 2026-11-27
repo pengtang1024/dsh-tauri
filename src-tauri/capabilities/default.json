@@ -1,7 +1,27 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities of the shell windows: the main window that hosts the DSH web application, and the splash that polls the boot progress.",
-  "windows": ["main", "splash"],
-  "permissions": ["core:default"]
+  "description": "Capabilities of the shell windows: the main window that hosts the DSH web application, and the splash that polls the boot progress. The main window loads the DSH UI from the loopback service, which Tauri treats as a remote origin, so the same capability must also match that origin (remote.urls) and grant every application command the injected SHIM invokes; the splash is a local origin and needs runtime_status.",
+  "windows": [
+    "main",
+    "splash"
+  ],
+  "local": true,
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "allow-pick-directory",
+    "allow-clipboard-read",
+    "allow-clipboard-write",
+    "allow-open-external",
+    "allow-notify",
+    "allow-set-title",
+    "allow-shell-info",
+    "allow-runtime-status"
+  ]
 }

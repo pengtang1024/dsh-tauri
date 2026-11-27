@@ -49,6 +49,13 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 | `__DSH_DIRECTORY_PICKER__` | `pick(options)` | `pick_directory` | `{ title: options?.title }` | `string \| null`，取消为 null（`native.rs:95-106`） |
 | （无 global，靠副作用） | `document.title` 同步 | `set_title` | `{ title }` | `void`；MutationObserver 观察 head，空标题忽略（`native.rs:259-268`） |
 
+### 1.1 应用命令的 ACL 前置条件（Tauri 2.12 起必须，2026-11-28 修复）
+
+上表每个 `invoke command` 都是应用自定义命令（`main.rs:101-110` 的 `generate_handler!`），它们**必须被 capabilities 放行**，否则运行期被拒为 `Command <name> not allowed by ACL`（release 构建的固定文案；debug 构建给出 `pick_directory not allowed. Plugin not found` 这类明细）：
+
+- 主窗口用 `WebviewUrl::External` 加载回环服务（`http://127.0.0.1:<port>`，`shell_ui.rs:632`）。tauri 2.12.7 的 `is_local_url`（`webview/mod.rs:1961-2002`）只把 tauri 协议 / devUrl / frontendDist / 自注册协议视作本地，回环 HTTP 属于 **remote origin**；`on_message`（`webview/mod.rs:2080`）因此对本项目的应用命令一律做 ACL 检查（2.10.2 的条件里没有 `|| !is_local`，这是 2.12 收紧后的行为）。
+- 应用命令的权限来自应用清单：`src-tauri/permissions/dsh-shims.toml` 为每个命令声明一条 `allow-<command>`（`src-tauri/permissions` 是 tauri-build 的默认权限目录，`attributes.app_manifest` 为空表时也会解析），`capabilities/default.json` 再把它们列进 `permissions`，并用 `remote.urls` 覆盖回环来源；`splash` 走 `tauri://localhost` 本地来源，靠 `local`（默认 true）放行 `runtime_status`。
+- 守卫：`tools/check-capabilities.mjs`（`npm run check:capabilities`）现在断言「SHIM/启动页调用的每个命令都被放行」「引用的应用权限存在」「有 External 窗口就必须声明 `remote.urls` 且覆盖默认回环主机」「URL pattern 不含方括号（urlpattern 会在 `generate_context!` 里 panic）」「`local` 未被关闭」。
 运行状态面板佐证：`src-tauri/src/shell_ui.rs` 的 `about_text` 在「关于 dsh-tauri」中展示 `shell_info` 四字段、SHIM 协议版本 1，以及「未实现上游桌面对象」的文字说明；**只做文字说明，既不设置 `data-platform`，也不注入 `dshDesktop`**（见第 5 节决策）。
 
 补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；它现在还校验 token URL 返回的 303 `Location` 必须仍在本地 origin（`redirectIsLocal`，缺失/外部 origin 即 FAIL 且不回显目标），防止 WebView 被导向外部站点后注入原生能力；对应 npm 单测 28 项（含重定向门禁 2 项）。与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
@@ -129,7 +136,7 @@ grep -rn 'dshDesktop' runtime/node_modules/@deepseek-ai/dsh-client-ui-{file-drag
 grep -o 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Ciz7DZxv.js | sort -u
 ```
 
-> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 190 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
+> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 194 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
 
 ## 5. dshDesktop v1 决策：明确不实现
 
