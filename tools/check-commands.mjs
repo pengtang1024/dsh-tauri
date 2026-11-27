@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 /**
- * Read-only guard: every #[tauri::command] function under src-tauri/src (recursive)
- * must be registered in main.rs's generate_handler! block. A missing entry
- * compiles and passes every test, but the page gets "command not found" at
- * runtime — so the SHIM capability silently stops working.
+ * Read-only guards for Tauri command names:
+ * 1. every #[tauri::command] under src-tauri/src (recursive) is registered in
+ *    main.rs's generate_handler! block;
+ * 2. every command name invoked from the JS side is actually registered, and
+ *    every registered command is invoked somewhere on the JS side.
  *
- * Only node:fs / node:path / node:url are used; nothing is written.
- * Prints one PASS/FAIL per defined command with file:line, then
- * "SUMMARY: N checks, M FAILS". Exits 1 when any command is unregistered.
+ * A missing registration compiles and passes every other test, but the page
+ * gets "command not found" at runtime — so a renamed command silently stops
+ * the SHIM / boot page. Only node:fs / node:path / node:url are used; nothing
+ * is written. Prints one PASS/FAIL per check with file:line, then
+ * "SUMMARY: N checks, M FAILS". Exits 1 when any check fails.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -16,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const srcDir = join(root, 'src-tauri', 'src');
 const mainPath = join(srcDir, 'main.rs');
+const nativePath = join(srcDir, 'native.rs');
+const bootPath = join(root, 'src-tauri', 'dist', 'boot.html');
 
 function* sourceFiles(dir) {
   let entries;
@@ -57,17 +62,84 @@ if (handler) {
 }
 
 const FAILS = [];
+function fail(name) { FAILS.push(name); }
+function location(text, index) {
+  return text.slice(0, index).split(/\r?\n/).length;
+}
+
+// --- JS side: call('<name>') inside the SHIM raw string and core.invoke('<name>') in boot.html ---
+const nativeText = readFileSync(nativePath, 'utf8');
+const shimMatch = nativeText.match(/pub\s+const\s+SHIM\s*:\s*&str\s*=\s*r#"([\s\S]*?)"#\s*;/);
+const shimText = shimMatch ? shimMatch[1] : '';
+const shimWhere = relative(root, nativePath);
+const shimCalls = new Map();
+if (shimMatch) {
+  // Names are dynamic at the call site (call(command, args)); extract the
+  // literal arguments passed to call(...) in the injected script.
+  for (const m of shimText.matchAll(/\bcall\(\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\1\s*(?:,|\))/g)) {
+    if (!shimCalls.has(m[2])) shimCalls.set(m[2], shimWhere + ':' + location(shimText, m.index));
+  }
+} else {
+  fail('SHIM raw string not found in ' + shimWhere);
+}
+
+const bootText = readFileSync(bootPath, 'utf8');
+const bootRel = relative(root, bootPath);
+const bootCalls = new Map();
+for (const m of bootText.matchAll(/\binvoke\(\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\1\s*(?:,|\))/g)) {
+  if (!bootCalls.has(m[2])) bootCalls.set(m[2], bootRel + ':' + location(bootText, m.index));
+}
+
+const jsCalls = new Map([...shimCalls, ...bootCalls]);
+const jsNames = [...jsCalls.keys()].sort((a, b) => a.localeCompare(b));
+const registeredNames = [...registered].sort((a, b) => a.localeCompare(b));
+
+// 1. Existing Rust-defined ⊆ registered check (unchanged semantics).
 for (const { name, where } of defined) {
   if (registered.has(name)) {
     console.log('PASS ' + name + ' — ' + where + ' — 已注册');
   } else {
     console.log('FAIL ' + name + ' — ' + where + ' — 未在 main.rs 的 generate_handler! 注册');
-    FAILS.push(name);
+    fail(name);
   }
 }
 
-console.log('SUMMARY: ' + defined.length + ' checks, ' + FAILS.length + ' FAILS');
+// 2. Every JS-invoked command must exist in the generated Tauri handler.
+for (const name of jsNames) {
+  const where = jsCalls.get(name);
+  if (registered.has(name)) {
+    console.log('PASS JS→Rust ' + name + ' — ' + where + ' — 已注册');
+  } else {
+    console.log('FAIL JS→Rust ' + name + ' — ' + where + ' — 未在 main.rs 的 generate_handler! 注册');
+    fail('JS→Rust ' + name);
+  }
+}
+
+// 3. Every registered command must be invoked from the JS side (no dead command).
+for (const name of registeredNames) {
+  if (jsCalls.has(name)) {
+    console.log('PASS Rust→JS ' + name + ' — generate_handler! — JS 侧有调用');
+  } else {
+    console.log('FAIL Rust→JS ' + name + ' — generate_handler! — JS 侧无调用');
+    fail('Rust→JS ' + name);
+  }
+}
+
+// 4. Self-check: non-empty sources and no duplicate names inside one source.
+const checks = defined.length + jsNames.length + registeredNames.length + 4;
+const selfChecks = [
+  [shimCalls.size > 0, 'SHIM 提取到 ' + shimCalls.size + ' 个调用'],
+  [bootCalls.size > 0, 'boot 页提取到 ' + bootCalls.size + ' 个调用'],
+  [registered.size > 0, 'generate_handler! 提取到 ' + registered.size + ' 个注册'],
+  [jsNames.length === new Set(jsNames).size, 'JS 调用名无重复'],
+];
+for (const [ok, message] of selfChecks) {
+  console.log((ok ? 'PASS ' : 'FAIL ') + message);
+  if (!ok) fail(message);
+}
+
+console.log('SUMMARY: ' + checks + ' checks, ' + FAILS.length + ' FAILS');
 if (FAILS.length > 0) {
-  console.error('存在未注册的 Tauri 命令：' + FAILS.join('、'));
+  console.error('Tauri 命令名契约不一致：' + FAILS.join('、'));
   process.exit(1);
 }
