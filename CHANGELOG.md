@@ -1,6 +1,6 @@
 # 更新记录
 
-## 未发布
+## 0.7.1（2026-11-27）
 
 - **修复：长时间运行后黑带 / 右侧被裁的真因（WebKit fd 泄漏）**：定位到 Linux/Wayland 下窗口持续使用后出现的「底部/右侧纯黑、页面按旧宽度布局（侧栏常驻展开态、内容被右缘切断）」根因不在 GTK 尺寸分配，而在 WebKitGTK 的 NVIDIA DMABUF 渲染路径——它每个重绘帧泄漏一个 `anon_inode:sync_file` fd，WebKit 子进程继承的 `RLIMIT_NOFILE` 软上限 1024 被耗尽后日志出现 `Failed to allocate shared memory buffer`，新的绘制缓冲分配失败，绘制面停在旧尺寸（实机：用户实例 web 进程 1022/1024、949 个 sync_file）。外壳侧两处修复（均在 GTK/WebKit 初始化前生效，WebKit 子进程继承）：① 启动时把软上限提升到硬上限（目标 65536，绝不超硬上限、不降低已有的更高软上限，失败只记日志不 panic）；② 检测到 NVIDIA 驱动时关闭 WebKit 的 DMABUF 渲染器（`WEBKIT_DISABLE_DMABUF_RENDERER=1`，尊重用户已显式设置的值）以从源头停止泄漏——A/B 实测：30 次 resize 后 fd 由 111 涨到 485、sync_file 414 个；关闭后同样 30 次 resize 保持 33 个 fd、0 个 sync_file。实机验收：修复版 web 进程软上限 65536，把 fd 推到 1719（远超旧上限 1024）后执行「最小化期间 MoveResize 到 788x836 → 恢复」仍是紧凑布局（侧栏分隔线 x≈55，旧版为 279）、底部纯黑 0 行；可见状态 1340x646→788x836 单步与连续 5 次均 0 黑行、无自激、进程存活。
 - **证伪记录：不可见期间改尺寸不重放给 WebView**：健康实例上按「1340x646 → minimize → MoveResize 788x836 → unminimize+activate」实测恢复后布局正确（分隔线 x≈52–55、0 黑行），因此「恢复时未重放尺寸」不是本次黑带/裁切的根因，未据此改代码。
