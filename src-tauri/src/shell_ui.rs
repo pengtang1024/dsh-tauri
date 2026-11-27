@@ -240,8 +240,179 @@ fn close_label(keep_alive: bool) -> &'static str {
     }
 }
 
+/// Status-panel geometry. The panel keeps one fixed width and every line is
+/// pre-wrapped to `PANEL_COLS` display columns, so zenity never breaks a value
+/// mid-word (the old panel let a 110-column runtime path wrap across three
+/// lines at arbitrary characters).
+const PANEL_COLS: usize = 64;
+const PANEL_WIDTH: u32 = 500;
+/// Widest label ("运行时来源"); every value therefore starts in one column.
+const LABEL_COLS: usize = 10;
+const VALUE_COL: usize = LABEL_COLS + 2;
+
+const BRIDGE_SUMMARY: &str = "SHIM 协议 1；桌面对象未实现";
+const BRIDGE_DOC: &str = "docs/DESKTOP_BRIDGE.zh.md";
+
+/// Display columns of one character: CJK and fullwidth forms take two cells so
+/// the budget matches what GTK actually renders for mixed CJK/ASCII lines.
+fn char_cols(c: char) -> usize {
+    let code = c as u32;
+    let wide = matches!(
+        code,
+        0x1100..=0x115F
+            | 0x2E80..=0x303E
+            | 0x3041..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xA000..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE6F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+    );
+    if wide { 2 } else { 1 }
+}
+
+fn display_cols(text: &str) -> usize {
+    text.chars().map(char_cols).sum()
+}
+
+/// Marker for a value whose head was dropped: a path keeps its tail, so the
+/// readable part (module directory, file name) survives instead of a mid-word
+/// break. The "/" is part of the marker so no "…//" can appear.
+const HEAD_ELLIPSIS: &str = "…/";
+
+/// Keep the tail of a too-long value, starting it on a path boundary.
+fn elide_head(value: &str, budget: usize) -> String {
+    if display_cols(value) <= budget {
+        return value.to_owned();
+    }
+    let room = budget.saturating_sub(display_cols(HEAD_ELLIPSIS));
+    let mut tail: Vec<char> = Vec::new();
+    let mut used = 0;
+    for c in value.chars().rev() {
+        let cols = char_cols(c);
+        if used + cols > room {
+            break;
+        }
+        used += cols;
+        tail.push(c);
+    }
+    tail.reverse();
+    let tail: String = tail.into_iter().collect();
+    // Drop the partially captured leading component so the tail reads as a
+    // path rather than as a half-eaten directory name.
+    let tail = match tail.find('/') {
+        Some(index) if index + 1 < tail.len() => &tail[index + 1..],
+        _ => tail.as_str()
+    };
+    format!("{HEAD_ELLIPSIS}{tail}")
+}
+
+/// Keep the head of a too-long prose value; paths use `elide_head` instead.
+fn elide_tail(value: &str, budget: usize) -> String {
+    if display_cols(value) <= budget {
+        return value.to_owned();
+    }
+    let mut head = String::new();
+    let mut used = 0;
+    for c in value.chars() {
+        let cols = char_cols(c);
+        if used + cols + 1 > budget {
+            break;
+        }
+        used += cols;
+        head.push(c);
+    }
+    format!("{}…", head.trim_end())
+}
+
+/// Fit one value into a column budget: paths lose their head (the tail is what
+/// identifies them), prose loses its tail.
+fn fit_value(value: &str, budget: usize) -> String {
+    if display_cols(value) <= budget {
+        return value.to_owned();
+    }
+    if value.contains('/') { elide_head(value, budget) } else { elide_tail(value, budget) }
+}
+
+/// One aligned `label: value` fact line, never wider than `PANEL_COLS`.
+fn fact_line(label: &str, value: &str) -> String {
+    let pad = LABEL_COLS.saturating_sub(display_cols(label));
+    let prefix = format!("{label}{}: ", " ".repeat(pad));
+    let budget = PANEL_COLS.saturating_sub(display_cols(&prefix));
+    format!("{prefix}{}", fit_value(value, budget))
+}
+
+/// Continuation lines sit under the value column.
+fn value_indent() -> String {
+    " ".repeat(VALUE_COL)
+}
+
+/// Pack comma-separated items under one label line, breaking between items so
+/// no item is ever split mid-word. A wrap keeps the comma on the previous line
+/// and indents the continuation one level deeper, so the list still reads as a
+/// list instead of a bare orphaned word.
+fn pack_items(prefix: &str, items: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = prefix.to_owned();
+    let mut filled = false;
+    for item in items {
+        let token = if filled { format!(", {item}") } else { item.clone() };
+        if !filled {
+            current.push_str(&token);
+            filled = true;
+            continue;
+        }
+        if display_cols(&current) + display_cols(&token) <= PANEL_COLS {
+            current.push_str(&token);
+            continue;
+        }
+        let hung = format!("{current},");
+        if display_cols(&hung) <= PANEL_COLS {
+            lines.push(hung);
+        } else {
+            lines.push(current);
+        }
+        current = format!("{}  {item}", value_indent());
+    }
+    lines.push(current);
+    lines
+}
+
+/// Native-helper summary: an "n/5 可用" line, the installed names, and the
+/// missing ones with their purpose. The old panel crammed five
+/// `name（purpose）=state` pairs onto one ~150-column line which zenity then
+/// wrapped at arbitrary characters.
+fn helper_lines(facts: &StatusFacts) -> Vec<String> {
+    let installed: Vec<&str> = NATIVE_HELPERS
+        .iter()
+        .filter(|(name, _)| facts.helpers.iter().any(|(found, ok)| found == name && *ok))
+        .map(|(name, _)| *name)
+        .collect();
+    let missing: Vec<String> = NATIVE_HELPERS
+        .iter()
+        .filter(|(name, _)| !installed.contains(name))
+        .map(|(name, purpose)| format!("{name}（{purpose}）"))
+        .collect();
+    let mut lines = vec![fact_line(
+        "原生助手",
+        &format!("{}/{} 可用", installed.len(), NATIVE_HELPERS.len())
+    )];
+    if !installed.is_empty() {
+        let names: Vec<String> = installed.iter().map(|name| (*name).to_owned()).collect();
+        lines.extend(pack_items(&format!("{}可用: ", value_indent()), &names));
+    }
+    if !missing.is_empty() {
+        lines.extend(pack_items(&format!("{}缺失: ", value_indent()), &missing));
+    }
+    lines
+}
+
 /// Build the status-panel text from shell_info plus read-only desktop facts.
-/// Pure so the exact fields and fallback wording can be tested without a window.
+/// Pure so the exact fields, alignment and per-line width can be tested without
+/// a window.
 fn about_text(info: &serde_json::Value, facts: &StatusFacts) -> String {
     let field = |key: &str| -> String {
         match info.get(key).and_then(serde_json::Value::as_str) {
@@ -249,30 +420,19 @@ fn about_text(info: &serde_json::Value, facts: &StatusFacts) -> String {
             _ => "未设置".to_owned()
         }
     };
-    let helpers = NATIVE_HELPERS
-        .iter()
-        .map(|(name, purpose)| {
-            let state = if facts.helpers.iter().any(|(found, ok)| found == name && *ok) {
-                "可用"
-            } else {
-                "不可用"
-            };
-            format!("{name}（{purpose}）={state}")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "DSH Tauri {version}\n运行时: {runtime}\n运行时来源: {source}\n运行时版本: {runtime_version}\n自动更新: {auto_update}\n关闭窗口: {close}\n原生助手: {helpers}\n桥接: SHIM 协议 1；未实现上游桌面对象（详见 docs/DESKTOP_BRIDGE.zh.md）\n主目录: {home}\n配置: {profile}\n桌面版本: {version}",
-        version = field("desktopVersion"),
-        runtime = field("runtime"),
-        source = facts.source.unwrap_or("未设置"),
-        runtime_version = display_version(facts.version.as_deref()),
-        auto_update = auto_update_label(facts.auto_update, facts.updatable),
-        close = close_label(facts.close_to_tray),
-        helpers = helpers,
-        home = field("home"),
-        profile = field("profile")
-    )
+    let mut lines = vec![format!("DSH Tauri {}", field("desktopVersion")), String::new()];
+    lines.push(fact_line("运行时", &field("runtime")));
+    lines.push(fact_line("运行时来源", facts.source.unwrap_or("未设置")));
+    lines.push(fact_line("运行时版本", &display_version(facts.version.as_deref())));
+    lines.push(fact_line("自动更新", auto_update_label(facts.auto_update, facts.updatable)));
+    lines.push(fact_line("关闭窗口", close_label(facts.close_to_tray)));
+    lines.extend(helper_lines(facts));
+    lines.push(fact_line("桥接", BRIDGE_SUMMARY));
+    lines.push(format!("{}文档: {BRIDGE_DOC}", value_indent()));
+    lines.push(fact_line("主目录", &field("home")));
+    lines.push(fact_line("配置", &field("profile")));
+    lines.push(fact_line("桌面版本", &field("desktopVersion")));
+    lines.join("\n")
 }
 
 /// Show shell_info plus this shell's desktop-specific state in a lightweight
@@ -289,8 +449,18 @@ fn show_about(app: &AppHandle<Wry>) {
     // spawn, not output(): menu events run on Tauri's main thread, so waiting
     // for the dialog to close would freeze the DSH window. zenity owns its own
     // GTK loop; stderr is inherited so dialog errors stay visible in logs.
+    let width = format!("--width={PANEL_WIDTH}");
     if let Err(error) = Command::new("zenity")
-        .args(["--info", "--title", "dsh-tauri 运行状态", "--no-markup", "--text", &text])
+        .args([
+            "--info",
+            "--title", "dsh-tauri 运行状态",
+            "--no-markup",
+            // No auto-wrap: every line is already wrapped to PANEL_COLS, and
+            // GTK must never pick its own (mid-word) break points.
+            "--no-wrap",
+            &width,
+            "--text", &text
+        ])
         .spawn()
     {
         eprintln!("[dsh-tauri] 无法打开关于面板：{error}");
@@ -606,7 +776,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_version, encode_state, geometry_is_sane, helper_in_path, menu_window_label, navigate_error_message, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -628,6 +798,15 @@ mod tests {
         let tail = &source[start..];
         let end = tail.find("\nfn show_main_window").expect("install_tray must end before show_main_window");
         tail[..end].to_owned()
+    }
+
+    /// Value of one `label: value` fact line; also asserts the label padding
+    /// (the panel aligns every value in one column).
+    fn fact_value<'a>(text: &'a str, label: &str) -> Option<&'a str> {
+        text.lines().find_map(|line| {
+            let rest = line.strip_prefix(label)?;
+            rest.trim_start_matches(' ').strip_prefix(": ")
+        })
     }
 
     /// The top-level menu row, i.e. the text inside Menu::with_items.
@@ -782,19 +961,99 @@ mod tests {
             "desktopVersion": "0.5.0"
         });
         let text = about_text(&info, &facts());
-        assert!(text.starts_with("DSH Tauri 0.5.0\n运行时: /home/pt/.dsh/dsh-tauri/runtime"));
-        assert!(text.contains("运行时来源: 仓库 runtime/（checkout）"));
-        assert!(text.contains("运行时版本: 0.2.2-rc.5"));
-        assert!(text.contains("自动更新: 开启，但当前档位不自动写入"));
-        assert!(text.contains("关闭窗口: 关窗=托盘保活"));
-        assert!(text.contains("wl-paste（剪贴板读取）=不可用"));
-        assert!(text.contains("桥接: SHIM 协议 1；未实现上游桌面对象"));
-        assert!(text.contains("主目录: /home/pt/.dsh"));
-        assert!(text.contains("配置: web"));
-        assert!(text.ends_with("桌面版本: 0.5.0"));
+        assert!(text.starts_with("DSH Tauri 0.5.0\n\n运行时"), "title, blank separator, then facts");
+        assert_eq!(fact_value(&text, "运行时"), Some("/home/pt/.dsh/dsh-tauri/runtime"));
+        assert_eq!(fact_value(&text, "运行时来源"), Some("仓库 runtime/（checkout）"));
+        assert_eq!(fact_value(&text, "运行时版本"), Some("0.2.2-rc.5"));
+        assert_eq!(fact_value(&text, "自动更新"), Some("开启，但当前档位不自动写入（需手动更新）"));
+        assert_eq!(fact_value(&text, "关闭窗口"), Some("关窗=托盘保活（服务与会话继续运行）"));
+        assert_eq!(fact_value(&text, "原生助手"), Some("4/5 可用"));
+        assert!(text.contains("缺失: wl-paste（剪贴板读取）"), "missing helpers keep their purpose");
+        assert_eq!(fact_value(&text, "桥接"), Some("SHIM 协议 1；桌面对象未实现"));
+        assert!(text.contains("文档: docs/DESKTOP_BRIDGE.zh.md"));
+        assert_eq!(fact_value(&text, "主目录"), Some("/home/pt/.dsh"));
+        assert_eq!(fact_value(&text, "配置"), Some("web"));
+        assert_eq!(fact_value(&text, "桌面版本"), Some("0.5.0"));
+        assert!(text.lines().last().unwrap_or_default().starts_with("桌面版本"), "version closes the panel: {text:?}");
         // shell_info may carry JSON nulls; the panel must stay readable.
         let empty = about_text(&serde_json::json!({ "runtime": null, "home": "", "profile": null, "desktopVersion": null }), &facts());
         assert_eq!(empty.matches("未设置").count(), 5, "null/empty shell_info fields fall back (version shown twice)");
+    }
+
+    #[test]
+    fn every_panel_line_fits_the_column_budget() {
+        // The real path from the reported screenshot: one 110-column token that
+        // zenity used to wrap across three lines at arbitrary characters.
+        let info = serde_json::json!({
+            "runtime": "/home/pt/Work/DshProjects/dsh-plugin/dsh-tauri/src-tauri/./runtime/node_modules/@deepseek-ai/dsh/lib/bin.js",
+            "home": "/home/pt/Work/DshProjects/dsh-plugin/dsh-tauri/.tmp-profile",
+            "profile": "web",
+            "desktopVersion": "0.7.1"
+        });
+        let text = about_text(&info, &facts());
+        for line in text.lines() {
+            assert!(
+                display_cols(line) <= PANEL_COLS,
+                "line needs {} cols (budget {PANEL_COLS}): {line:?}",
+                display_cols(line)
+            );
+        }
+        assert_eq!(
+            text.lines().filter(|line| line.contains("bin.js")).count(),
+            1,
+            "the runtime path must stay on one line, never wrap"
+        );
+        assert_eq!(
+            text.lines().filter(|line| line.contains(".tmp-profile")).count(),
+            1,
+            "the home path must stay on one line too"
+        );
+    }
+
+    #[test]
+    fn long_paths_keep_their_identifiable_tail() {
+        let real = "/home/pt/Work/DshProjects/dsh-plugin/dsh-tauri/src-tauri/./runtime/node_modules/@deepseek-ai/dsh/lib/bin.js";
+        let elided = elide_head(real, 48);
+        assert!(display_cols(&elided) <= 48, "elided value must fit: {elided}");
+        assert!(elided.starts_with("…/"), "the dropped head is marked: {elided}");
+        assert!(elided.ends_with("lib/bin.js"), "the file name survives: {elided}");
+        assert!(!elided.contains("//"), "no doubled separator: {elided}");
+        assert_eq!(elide_head("/home/pt/.dsh", 48), "/home/pt/.dsh", "short values pass through untouched");
+        // Prose keeps its head, paths keep their tail.
+        let long_prose = "开启（更新下次启动生效）且不会在本窗口重载";
+        assert!(display_cols(&elide_tail(long_prose, 10)) <= 10);
+        assert!(elide_tail(long_prose, 10).ends_with('…'));
+    }
+
+    #[test]
+    fn fact_values_start_in_one_column() {
+        let info = serde_json::json!({
+            "runtime": "/home/pt/.dsh/dsh-tauri/runtime",
+            "home": "/home/pt/.dsh",
+            "profile": "web",
+            "desktopVersion": "0.7.1"
+        });
+        let text = about_text(&info, &facts());
+        let fact_lines: Vec<&str> = text
+            .lines()
+            .filter(|line| !line.starts_with(' ') && line.contains(": "))
+            .collect();
+        assert_eq!(fact_lines.len(), 10, "ten labelled facts (title and continuations excluded)");
+        for line in fact_lines.iter().skip(1) {
+            let colon = line.find(": ").unwrap_or_else(|| panic!("label missing colon: {line:?}"));
+            assert_eq!(display_cols(&line[..colon]), LABEL_COLS, "labels share one column: {line:?}");
+        }
+        assert_eq!(fact_line("配置", "web"), "配置      : web", "labels are padded, not ragged");
+    }
+
+    #[test]
+    fn helper_summary_is_compressed_and_names_the_missing_purpose() {
+        let lines = helper_lines(&facts());
+        assert!(lines[0].contains("4/5 可用"), "count first: {lines:?}");
+        assert!(lines.iter().any(|line| line.contains("可用: zenity, wl-copy")), "installed names listed: {lines:?}");
+        assert!(lines.iter().any(|line| line.contains("缺失: wl-paste（剪贴板读取）")), "missing + purpose: {lines:?}");
+        assert!(lines.iter().all(|line| !line.contains("=可用")), "old inline =state pairs are gone");
+        assert!(lines.iter().all(|line| display_cols(line) <= PANEL_COLS), "helper block obeys the budget");
     }
 
     #[test]
@@ -808,11 +1067,13 @@ mod tests {
             helpers: vec![]
         };
         let text = about_text(&serde_json::Value::Null, &empty_facts);
-        assert!(text.contains("运行时来源: 未设置"));
-        assert!(text.contains("运行时版本: 不可用"));
-        assert!(text.contains("关闭窗口: 关窗=退出"));
-        assert!(text.contains("原生助手: zenity（关于/选取面板）=不可用"));
-        assert_eq!(text.matches("不可用").count(), 6, "all five helpers + runtime version fall back");
+        assert_eq!(fact_value(&text, "运行时来源"), Some("未设置"));
+        assert_eq!(fact_value(&text, "运行时版本"), Some("不可用"));
+        assert_eq!(fact_value(&text, "关闭窗口"), Some("关窗=退出"));
+        assert_eq!(fact_value(&text, "原生助手"), Some("0/5 可用"));
+        for (name, purpose) in [("zenity", "关于/选取面板"), ("wl-paste", "剪贴板读取"), ("xdg-open", "外链打开")] {
+            assert!(text.contains(&format!("{name}（{purpose}）")), "missing helper {name} is reported");
+        }
         assert!(!text.contains("data-platform"), "must never mention platform injection");
         assert!(!text.contains("dshDesktop ="), "must never inject the desktop global");
     }
@@ -858,6 +1119,8 @@ mod tests {
         assert!(show.contains("crate::dsh::info(app)"), "about must show real shell_info");
         assert!(show.contains("Command::new(\"zenity\")"), "use the existing system helper");
         assert!(show.contains("--no-markup"), "untrusted paths must not be parsed as markup");
+        assert!(show.contains("--no-wrap"), "GTK must never pick its own mid-word break points");
+        assert!(show.contains("--width={PANEL_WIDTH}"), "the panel width comes from the shared constant");
         assert!(show.contains(".spawn()"), "dialog must not block the main thread");
         assert!(show.contains("if let Err(error)"), "dialog failure must be logged");
         let handler = source
