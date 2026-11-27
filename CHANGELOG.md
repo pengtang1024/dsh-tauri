@@ -2,6 +2,8 @@
 
 ## 未发布
 
+- **修复：关 DMABUF 后菜单透字（按需注入近不透明菜单表面）**：v0.7.1 为治 WebKit fd 泄漏在 NVIDIA 上关闭 DMABUF 渲染器后，视图走软件渲染路径、`backdrop-filter` 被整段忽略，而上游菜单表面 `--dsw-menu-surface-fill` 仍是 0.64 透明度 → 玻璃菜单退化为「半透明色块 + 清晰透字」。外壳侧按需兜底：只在 `main::dmabuf_renderer_disabled()` 为真时，向主窗口初始化脚本追加一个 `<style>`（在 `native::SHIM` 之后追加一次 `initialization_script`，SHIM 注入点与契约不变），把 `--dsw-menu-surface-fill` 提到 0.94（暗 `rgba(48,49,54,0.94)` / 亮 `rgba(252,253,254,0.94)`，暗色沿用上游 `body[data-ds-dark-theme]` 判定、加 `html` 前缀保证优先级）并把 `--dsw-menu-backdrop-filter` 置 `none`；`WEBKIT_DISABLE_DMABUF_RENDERER=0` 等开启 DMABUF 的机器不注入、玻璃保留。CSS 生成与脚本拼装为纯函数（`native::menu_surface_fallback_css` / `menu_fallback_injection`），flag=false 时返回空脚本、完全不注入；4 项单测覆盖两套主题、两条分支与 JSON 转义，上游改 token 名只会静默失效。实测（独立实例 + 私有 `XDG_RUNTIME_DIR` + 静态玻璃页回读 computed token，同 task-399 的像素法）：关 DMABUF 时 `fill=rgba(48,49,54,0.94)`、`filter=none`、注入 1 个 style，面板内 Δ(p95-p5)=14.0；同路径强制 token 保持 0.64（=修复前）Δ=87.0；关为 0 时未注入、`fill=rgba(48,49,54,0.64)`、`filter=blur(40px) saturate(150%)`、Δ=7.0。Rust 单测总数 214。
+
 - **修复：目录选择报「Command pick_directory not allowed by ACL」**：tauri 2.12.7 把 `WebviewUrl::External` 加载的回环页面（`http://127.0.0.1:<port>`）判为 remote origin，`on_message` 因此对本项目的应用自定义命令一律走 ACL（`webview/mod.rs:2080` 的条件在 2.10.2 里没有 `|| !is_local`，2.12 才收紧）；而 `capabilities/default.json` 既没有 `remote.urls`、也没有任何应用权限，应用清单为空，于是 SHIM 的应用命令连同启动页的 `runtime_status` 全部被拒——目录选择是上游唯一真正消费的桌面能力，直接不可用。修法零依赖、零侵入：新增 `src-tauri/permissions/dsh-shims.toml`（8 条应用权限，每条只放行一个命令），`capabilities/default.json` 补 `remote.urls`（`http://127.0.0.1:*` / `http://localhost:*`，端口随进程变化）并列出这 8 条权限，`local` 保持放行供 splash 使用；未改 SHIM 行为、未新增 crate。守卫：`tools/check-capabilities.mjs` 从 4 项扩到 13 项，新增「SHIM/启动页调用的每个命令都被 capabilities 放行」「capability 引用的应用权限存在」「有 External 窗口就必须声明 `remote.urls`」「`remote.urls` 覆盖默认回环主机」「URL pattern 不含方括号（urlpattern 会在 `generate_context!` 编译期 panic）」「`local` 未被关闭」——反向验证：删掉 `allow-pick-directory` 后守卫 FAIL 并点名 `pick_directory`，恢复即绿。实测（独立实例 + 私有 `XDG_RUNTIME_DIR`，不碰用户实例）：同一页面对 `DSH_TAURI_URL` 注入的 `__DSH_DIRECTORY_PICKER__.pick()`，修复前返回 `pick_directory not allowed. Plugin not found`，修复后弹出 GTK 目录框（标题「ACL 实测目录」，进程 `zenity --file-selection --directory`），且无 ACL 报错。
 ## 0.7.1（2026-11-27）
 
@@ -103,7 +105,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 194 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 214 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策

@@ -272,11 +272,101 @@ pub const SHIM: &str = r#"
 })();
 "#;
 
+/// CSS that keeps the menu surface readable when the compositor cannot blur.
+///
+/// Disabling WebKit's DMABUF renderer (see `should_disable_dmabuf` in main.rs)
+/// moves the view onto a software path where `backdrop-filter` is ignored
+/// outright. The upstream menu surface (`--dsw-menu-surface-fill`, alpha 0.64)
+/// then stops being glass and becomes a see-through block with page text
+/// showing through it, so on that path it is raised to 0.94 — the same
+/// near-opaque value upstream already uses for its macOS fallback — and the
+/// filter is switched off.
+///
+/// The dark/light split follows the upstream theme contract exactly: light
+/// values live on `body`, dark ones under `body[data-ds-dark-theme]`
+/// (dsh-client-ui-theme design-platform.css). `html body…` outranks the upstream
+/// selectors by specificity, so the override does not depend on this <style>
+/// arriving after the application stylesheet.
+const MENU_SURFACE_FALLBACK_CSS: &str = "html body {
+  --dsw-menu-surface-fill: rgba(252, 253, 254, 0.94);
+  --dsw-menu-backdrop-filter: none;
+}
+html body[data-ds-dark-theme] {
+  --dsw-menu-surface-fill: rgba(48, 49, 54, 0.94);
+}
+";
+
+/// The fallback stylesheet, or nothing when the DMABUF renderer is still on
+/// (the blur works there, so the original glass surface is kept).
+pub fn menu_surface_fallback_css(dmabuf_disabled: bool) -> &'static str {
+    if dmabuf_disabled { MENU_SURFACE_FALLBACK_CSS } else { "" }
+}
+
+/// Extra initialisation script for the main window: the menu fallback only,
+/// or nothing when the DMABUF renderer is on.
+///
+/// It is a separate `initialization_script` call, so the SHIM injection point
+/// and its contract stay exactly as they were. The style element is created and
+/// appended when the script runs (before any page code, so a later repaint
+/// already uses the override); if the document is still bare, insertion waits
+/// for `DOMContentLoaded`. Nothing here reads a token name back: if upstream
+/// renames the custom properties the plain declarations simply stop matching
+/// and the page keeps its own values.
+pub fn menu_fallback_injection(dmabuf_disabled: bool) -> String {
+    menu_surface_fallback_script(menu_surface_fallback_css(dmabuf_disabled))
+}
+
+/// Placeholder the stylesheet literal replaces; kept as a named constant so a
+/// single, unambiguous substitution can be asserted in tests.
+const MENU_SURFACE_CSS_PLACEHOLDER: &str = "__DSH_MENU_CSS__";
+
+/// Wrap the stylesheet into the self-contained insertion snippet. The CSS is
+/// serialised as a JSON string literal, so no quoting or newline in it can
+/// break out of the JavaScript string, and no caller text is ever spliced in.
+/// An empty stylesheet yields an empty script, i.e. no injection at all.
+fn menu_surface_fallback_script(css: &str) -> String {
+    if css.is_empty() {
+        return String::new();
+    }
+    let literal = serde_json::to_string(css).unwrap_or_else(|_| "\"\"".to_string());
+    MENU_SURFACE_FALLBACK_SCRIPT.replacen(MENU_SURFACE_CSS_PLACEHOLDER, &literal, 1)
+}
+
+/// Insertion snippet as a template: `__DSH_MENU_CSS__` is replaced by the JSON
+/// literal of the stylesheet, so no CSS text is ever spliced into JavaScript
+/// without escaping.
+const MENU_SURFACE_FALLBACK_SCRIPT: &str = r#"
+(() => {
+  try {
+    const css = __DSH_MENU_CSS__;
+    const attach = () => {
+      const parent = document.head || document.documentElement;
+      if (!parent) return false;
+      const style = document.createElement('style');
+      style.id = 'dsh-tauri-menu-surface';
+      style.textContent = css;
+      parent.appendChild(style);
+      return true;
+    };
+    if (attach()) return;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', attach, { once: true });
+    } else {
+      window.addEventListener('load', attach, { once: true });
+    }
+  } catch (error) {
+    console.warn('[dsh-tauri] menu surface fallback skipped:', error);
+  }
+})();
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::{
-        external_url_allowed, notify_args, picked_path, status_message, title_window_label,
-        write_error_message, HelperOutcome,
+        external_url_allowed, menu_fallback_injection, menu_surface_fallback_css,
+        menu_surface_fallback_script, notify_args, picked_path, status_message, title_window_label,
+        write_error_message, HelperOutcome, MENU_SURFACE_CSS_PLACEHOLDER,
+        MENU_SURFACE_FALLBACK_SCRIPT,
     };
 
     #[test]
@@ -531,5 +621,73 @@ mod tests {
     #[test]
     fn title_targets_splash_during_startup() {
         assert_eq!(title_window_label(false), "splash");
+    }
+
+    /// Both palettes need the fallback: the upstream surface is translucent in
+    /// dark (0.64) and light (0.7) alike, so both are raised to 0.94 and the
+    /// ignored filter is switched off.
+    #[test]
+    fn menu_fallback_css_is_near_opaque_in_both_themes() {
+        let css = menu_surface_fallback_css(true);
+        assert!(css.contains("--dsw-menu-surface-fill: rgba(48, 49, 54, 0.94)"), "dark fill: {css}");
+        assert!(
+            css.contains("--dsw-menu-surface-fill: rgba(252, 253, 254, 0.94)"),
+            "light fill: {css}"
+        );
+        assert!(css.contains("--dsw-menu-backdrop-filter: none"), "blur off: {css}");
+        assert!(css.contains("body[data-ds-dark-theme]"), "upstream dark selector: {css}");
+        assert!(!css.contains("0.64") && !css.contains("0.7)"), "translucent fills remain: {css}");
+    }
+
+    /// With the DMABUF renderer on the glass surface is correct, so no extra
+    /// script may be added (and the SHIM is injected separately, untouched).
+    #[test]
+    fn menu_fallback_is_absent_while_dmabuf_is_on() {
+        assert!(menu_surface_fallback_css(false).is_empty());
+        assert!(menu_fallback_injection(false).is_empty(), "no override script may be added");
+        assert!(!menu_fallback_injection(false).contains("dsh-tauri-menu-surface"));
+    }
+
+    /// The injection is one appended <style>: no token read-back, no globals,
+    /// no page-class selectors, so an upstream rename only stops matching.
+    #[test]
+    fn menu_fallback_script_only_appends_a_style_element() {
+        let script = menu_fallback_injection(true);
+        assert!(!script.contains("__TAURI__"), "the SHIM is injected separately, not duplicated");
+        for needle in [
+            "document.head || document.documentElement",
+            "document.createElement('style')",
+            "style.textContent = css",
+            "parent.appendChild(style)",
+            "DOMContentLoaded",
+        ] {
+            assert!(script.contains(needle), "missing {needle}");
+        }
+        assert!(!script.contains(MENU_SURFACE_CSS_PLACEHOLDER), "placeholder must be substituted");
+        assert!(!script.contains("dshDesktop"), "must not inject the desktop global");
+        assert!(!script.contains("data-platform"), "must not set a platform attribute");
+        assert_eq!(script.matches("style.id = 'dsh-tauri-menu-surface'").count(), 1, "one style");
+        let literal_line = script
+            .lines()
+            .find(|line| line.trim_start().starts_with("const css = "))
+            .expect("stylesheet literal line");
+        assert!(literal_line.trim_end().ends_with("\";"), "one-line literal: {literal_line}");
+    }
+
+    /// Stylesheet text is data: quotes, backslashes, newlines and markup must
+    /// all survive as an escaped JSON literal instead of breaking the script.
+    #[test]
+    fn menu_fallback_script_escapes_the_stylesheet() {
+        let css = "a\"b\\c\nd</style><script>alert(1)</script>";
+        let script = menu_surface_fallback_script(css);
+        let line = script
+            .lines()
+            .find(|line| line.trim_start().starts_with("const css = "))
+            .expect("stylesheet literal line");
+        let literal = line.trim().trim_start_matches("const css = ").trim_end_matches(';');
+        assert_eq!(serde_json::from_str::<String>(literal).expect("valid JSON literal"), css);
+        // Escaped newlines keep the literal on one line: the injected script
+        // gains no structure from the stylesheet, whatever it contains.
+        assert_eq!(script.lines().count(), MENU_SURFACE_FALLBACK_SCRIPT.lines().count());
     }
 }

@@ -67,7 +67,7 @@ fn raise_nofile_limit() {
 }
 
 /// WebKit env switch for the NVIDIA DMABUF renderer (the leaking code path).
-const WEBKIT_DMABUF_ENV: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+pub(crate) const WEBKIT_DMABUF_ENV: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 
 /// True when an NVIDIA driver is loaded: only its DMABUF renderer leaks the
 /// `sync_file` fds measured above.
@@ -91,6 +91,16 @@ fn apply_webkit_workarounds() {
         return;
     }
     std::env::set_var(WEBKIT_DMABUF_ENV, "1");
+}
+
+/// Whether this process really runs WebKit without the DMABUF renderer.
+///
+/// Reads the effective value instead of re-deriving it: `apply_webkit_workarounds`
+/// has already run, so a user who set the switch to 1 explicitly lands on the
+/// same software path where `backdrop-filter` is ignored, and needs the same
+/// menu fallback (see `native::menu_surface_fallback_css`).
+pub(crate) fn dmabuf_renderer_disabled() -> bool {
+    std::env::var(WEBKIT_DMABUF_ENV).is_ok_and(|value| value == "1")
 }
 
 fn main() {

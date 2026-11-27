@@ -630,6 +630,8 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
     let state = fit_to_screen(app, load_window_state());
     let menu = build_menu(app).map_err(|error| format!("cannot build the application menu: {error}"))?;
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+        // Rebuild the globals a desktop client is expected to provide, on top of
+        // the native commands; see native::SHIM.
         .initialization_script(crate::native::SHIM)
         .title("DSH")
         .inner_size(state.width, state.height)
@@ -637,6 +639,14 @@ pub fn build_main_window(app: &AppHandle<Wry>, url: tauri::Url) -> Result<Webvie
         .menu(menu);
     if let (Some(x), Some(y)) = (state.x, state.y) {
         builder = builder.position(f64::from(x), f64::from(y));
+    }
+    // Separate script on purpose: the SHIM injection above keeps its exact
+    // contract, while this one is empty unless the DMABUF renderer is off. On
+    // that software path backdrop-filter is ignored, so the menu surface has to
+    // become near-opaque instead of a see-through block.
+    let menu_fallback = crate::native::menu_fallback_injection(crate::dmabuf_renderer_disabled());
+    if !menu_fallback.is_empty() {
+        builder = builder.initialization_script(menu_fallback);
     }
     let window = builder.build().map_err(|error| format!("cannot open the window: {error}"))?;
     if state.maximized {

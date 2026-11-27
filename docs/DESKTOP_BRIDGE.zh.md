@@ -60,6 +60,10 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 
 补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；它现在还校验 token URL 返回的 303 `Location` 必须仍在本地 origin（`redirectIsLocal`，缺失/外部 origin 即 FAIL 且不回显目标），防止 WebView 被导向外部站点后注入原生能力；对应 npm 单测 28 项（含重定向门禁 2 项）。与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
 
+### 1.2 渲染路径限制：关 DMABUF 时菜单表面的兜底（无契约变更）
+
+上游菜单表面由 `._material_*` 消费 `--dsw-menu-surface-fill`（暗 `rgba(48,49,54,0.64)` / 亮 `rgba(252,253,254,0.7)`）与 `--dsw-menu-backdrop-filter`（`blur(40px) saturate(150%)`）。在 WebKitGTK 的软件渲染路径（`WEBKIT_DISABLE_DMABUF_RENDERER=1`，本外壳在 NVIDIA 上默认设置以治 fd 泄漏）`backdrop-filter` 被整段忽略，菜单于是变成半透明色块并透出页面文字——这是上游限制，不是桥接契约的一部分。外壳只在确实关闭 DMABUF 时，向主窗口初始化脚本追加一个 `<style>`（在 `native::SHIM` 之后追加一次 `initialization_script`，不改变协议版本、不注入 `dshDesktop`、不设置 `data-platform`），把上述两个 token 覆盖为 0.94 / `none`；开启 DMABUF 时不注入。因此第 1 节的契约表与第 2 节的探测结论都不变，`test/shim-contract.test.mjs` 的断言也不受影响。
+
 ## 2. 上游 Web UI 实际探测／调用的桌面全局——逐项对照
 
 ### 2.1 主 bundle（浏览器直接加载的两个 JS）
@@ -136,7 +140,7 @@ grep -rn 'dshDesktop' runtime/node_modules/@deepseek-ai/dsh-client-ui-{file-drag
 grep -o 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Ciz7DZxv.js | sort -u
 ```
 
-> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 194 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
+> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 214 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
 
 ## 5. dshDesktop v1 决策：明确不实现
 
