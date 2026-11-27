@@ -263,6 +263,74 @@ pub(crate) async fn choose(app: &AppHandle, title: String) -> Result<Option<Stri
         .map_err(|error| format!("目录对话框结果通道断开：{error}"))?
 }
 
+/// Queue a read-only GTK information dialog and await its dismissal.
+///
+/// The About panel is plain text already wrapped to a fixed column budget by
+/// `shell_ui::about_text`, so a `GtkTextView` with wrapping disabled shows it
+/// exactly as authored (no mid-word rewrap). It is deliberately a plain GTK
+/// widget rather than `zenity --info`: zenity is absent from Fedora/Arch
+/// minimal installs and KDE distributions ship `kdialog` instead, while GTK3
+/// and WebKitGTK are already hard dependencies of the shell itself.
+///
+/// Same non-deadlocking model as `choose`: an async command posts the widget
+/// to the GTK thread, then waits on an mpsc result from a blocking-pool task.
+/// `dialog.run()`'s nested GLib loop keeps dispatching main-thread jobs while
+/// open, and the GTK closure never waits on the command side.
+pub(crate) async fn show_info(
+    app: &AppHandle,
+    title: String,
+    text: String,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    let (sender, receiver) = mpsc::channel::<Result<(), String>>();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let parent = handle
+            .get_webview_window("main")
+            .or_else(|| handle.get_webview_window("splash"))
+            .and_then(|window| window.gtk_window().ok());
+        let dialog = gtk::Dialog::with_buttons(
+            Some(&title),
+            parent.as_ref(),
+            gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
+            &[("确定", gtk::ResponseType::Accept)],
+        );
+        dialog.set_default_size(width, height);
+        dialog.set_default_response(gtk::ResponseType::Accept);
+
+        let view = gtk::TextView::builder()
+            .editable(false)
+            .cursor_visible(false)
+            .monospace(true)
+            .wrap_mode(gtk::WrapMode::None)
+            .build();
+        if let Some(buffer) = view.buffer() {
+            buffer.set_text(&text);
+        }
+        let scroll = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        scroll.set_hexpand(true);
+        scroll.set_vexpand(true);
+        scroll.set_margin_start(12);
+        scroll.set_margin_end(12);
+        scroll.set_margin_top(12);
+        scroll.set_margin_bottom(12);
+        scroll.add(&view);
+        dialog.content_area().pack_start(&scroll, true, true, 0);
+
+        dialog.show_all();
+        let _ = dialog.run();
+        // close() (not the unsafe destroy()) tears the dialog down after run().
+        dialog.close();
+        let _ = sender.send(Ok(()));
+    })
+    .map_err(|error| format!("无法把关于面板排进主线程：{error}"))?;
+    tauri::async_runtime::spawn_blocking(move || receiver.recv())
+        .await
+        .map_err(|error| format!("关于面板任务失败：{error}"))?
+        .map_err(|error| format!("关于面板结果通道断开：{error}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::{expand_input, resolve_dir, selection_from, source_from_env, Source};

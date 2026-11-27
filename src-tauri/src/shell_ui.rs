@@ -150,8 +150,11 @@ pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
 /// Native helpers the desktop shell leans on. Detection is a read-only PATH
 /// lookup: no helper is invoked, so a missing one can only affect the panel
 /// text, never the running session.
-const NATIVE_HELPERS: [(&str, &str); 5] = [
-    ("zenity", "关于/选取面板"),
+/// 主路径是自绘 GTK（`picker.rs`），zenity/kdialog 只作兜底，详见 `show_about`
+/// 与 `native::pick_with_native`。
+const NATIVE_HELPERS: [(&str, &str); 6] = [
+    ("zenity", "面板/目录兜底"),
+    ("kdialog", "KDE 目录兜底"),
     ("wl-copy", "剪贴板写入"),
     ("wl-paste", "剪贴板读取"),
     ("notify-send", "系统通知"),
@@ -241,11 +244,12 @@ fn close_label(keep_alive: bool) -> &'static str {
 }
 
 /// Status-panel geometry. The panel keeps one fixed width and every line is
-/// pre-wrapped to `PANEL_COLS` display columns, so zenity never breaks a value
-/// mid-word (the old panel let a 110-column runtime path wrap across three
-/// lines at arbitrary characters).
+/// pre-wrapped to `PANEL_COLS` display columns, so the self-drawn GTK text view
+/// (and the legacy zenity fallback) never breaks a value mid-word (the old panel
+/// let a 110-column runtime path wrap across three lines at arbitrary characters).
 const PANEL_COLS: usize = 64;
-const PANEL_WIDTH: u32 = 500;
+const PANEL_WIDTH: i32 = 500;
+const PANEL_HEIGHT: i32 = 420;
 /// Widest label ("运行时来源"); every value therefore starts in one column.
 const LABEL_COLS: usize = 10;
 const VALUE_COL: usize = LABEL_COLS + 2;
@@ -381,7 +385,7 @@ fn pack_items(prefix: &str, items: &[String]) -> Vec<String> {
     lines
 }
 
-/// Native-helper summary: an "n/5 可用" line, the installed names, and the
+/// Native-helper summary: an "n/6 可用" line, the installed names, and the
 /// missing ones with their purpose. The old panel crammed five
 /// `name（purpose）=state` pairs onto one ~150-column line which zenity then
 /// wrapped at arbitrary characters.
@@ -436,35 +440,57 @@ fn about_text(info: &serde_json::Value, facts: &StatusFacts) -> String {
 }
 
 /// Show shell_info plus this shell's desktop-specific state in a lightweight
-/// native status panel. Tauri 2.12.7 itself has no dialog API (that lives in the
-/// optional tauri-plugin-dialog crate, which is not a dependency here and must
-/// not be added under this task's 0-invasion constraint). Use the system's
-/// zenity --info helper, already present for the folder picker in native.rs,
-/// with --no-markup so user-controlled paths are never parsed as Pango markup.
-/// No external URL, no capability, no new dependency; failures are logged and
-/// never block the menu.
+/// native status panel. Tauri 2.12.7 itself has no dialog API (that lives in
+/// the optional tauri-plugin-dialog crate, which is not a dependency here and
+/// must not be added under this task's 0-invasion constraint).
+///
+/// The primary path is our own GTK dialog (`picker::show_info`): GTK3 is a hard
+/// dependency of the shell and WebView already, so no extra helper package is
+/// needed — important for Fedora/Arch minimal installs and KDE distributions.
+/// Menu events run on the GTK main thread, so `show_about` only gathers data
+/// there and queues an async task; the dialog is built on the main thread and
+/// awaited via mpsc + `spawn_blocking` (see picker.rs, no deadlock). zenity
+/// stays only as a degenerate fallback for the case the GTK dialog cannot be
+/// queued; its text is pre-wrapped and passed with --no-markup/--no-wrap.
 fn show_about(app: &AppHandle<Wry>) {
     let info = crate::dsh::info(app);
     let text = about_text(&info, &status_facts(Some(app)));
-    // spawn, not output(): menu events run on Tauri's main thread, so waiting
-    // for the dialog to close would freeze the DSH window. zenity owns its own
-    // GTK loop; stderr is inherited so dialog errors stay visible in logs.
-    let width = format!("--width={PANEL_WIDTH}");
-    if let Err(error) = Command::new("zenity")
-        .args([
-            "--info",
-            "--title", "dsh-tauri 运行状态",
-            "--no-markup",
-            // No auto-wrap: every line is already wrapped to PANEL_COLS, and
-            // GTK must never pick its own (mid-word) break points.
-            "--no-wrap",
-            &width,
-            "--text", &text
-        ])
-        .spawn()
-    {
-        eprintln!("[dsh-tauri] 无法打开关于面板：{error}");
-    }
+    let handle = app.clone();
+    let panel = text.clone();
+    let task = tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::picker::show_info(
+            &handle,
+            "dsh-tauri 运行状态".to_owned(),
+            panel,
+            PANEL_WIDTH,
+            PANEL_HEIGHT,
+        )
+        .await
+        {
+            eprintln!("[dsh-tauri] GTK 关于面板不可用，回退 zenity：{error}");
+            // zenity's own loop is separate; spawn (not output) so this async
+            // worker never waits for the dialog to close.
+            let width = format!("--width={PANEL_WIDTH}");
+            if let Err(error) = Command::new("zenity")
+                .args([
+                    "--info",
+                    "--title", "dsh-tauri 运行状态",
+                    "--no-markup",
+                    // No auto-wrap: every line is already wrapped to PANEL_COLS.
+                    "--no-wrap",
+                    &width,
+                    "--text", &text,
+                ])
+                .spawn()
+            {
+                eprintln!("[dsh-tauri] 无法打开关于面板（zenity 也不可用）：{error}");
+            }
+        }
+    });
+    // The task is fire-and-forget: the dialog posts its own result, and the
+    // menu must return immediately. Drop the handle explicitly (clippy's
+    // let_underscore_future guard) rather than awaiting it on the GTK thread.
+    std::mem::drop(task);
 }
 
 /// Which window owns the shared menu: the real UI once it exists, otherwise the
@@ -786,7 +812,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -955,10 +981,10 @@ mod tests {
             version: Some("0.2.2-rc.5".to_owned()),
             auto_update: true,
             close_to_tray: true,
-            helpers: vec![
-                ("zenity", true), ("wl-copy", true), ("wl-paste", false),
-                ("notify-send", true), ("xdg-open", true)
-            ]
+            helpers: NATIVE_HELPERS
+                .iter()
+                .map(|(name, _)| (*name, *name != "wl-paste" && *name != "kdialog"))
+                .collect()
         }
     }
 
@@ -977,8 +1003,11 @@ mod tests {
         assert_eq!(fact_value(&text, "运行时版本"), Some("0.2.2-rc.5"));
         assert_eq!(fact_value(&text, "自动更新"), Some("开启，但当前档位不自动写入（需手动更新）"));
         assert_eq!(fact_value(&text, "关闭窗口"), Some("关窗=托盘保活（服务与会话继续运行）"));
-        assert_eq!(fact_value(&text, "原生助手"), Some("4/5 可用"));
-        assert!(text.contains("缺失: wl-paste（剪贴板读取）"), "missing helpers keep their purpose");
+        assert_eq!(fact_value(&text, "原生助手"), Some("4/6 可用"));
+        assert!(text.contains("缺失: kdialog（KDE 目录兜底）"), "kdialog is reported as an optional KDE fallback");
+        // The missing list wraps between items at the 64-column budget, so the
+        // second item may start on a continuation line.
+        assert!(text.contains("wl-paste（剪贴板读取）"), "missing helpers keep their purpose");
         assert_eq!(fact_value(&text, "桥接"), Some("SHIM 协议 1；桌面对象未实现"));
         assert!(text.contains("文档: docs/DESKTOP_BRIDGE.zh.md"));
         assert_eq!(fact_value(&text, "主目录"), Some("/home/pt/.dsh"));
@@ -1059,9 +1088,11 @@ mod tests {
     #[test]
     fn helper_summary_is_compressed_and_names_the_missing_purpose() {
         let lines = helper_lines(&facts());
-        assert!(lines[0].contains("4/5 可用"), "count first: {lines:?}");
+        assert!(lines[0].contains("4/6 可用"), "count first: {lines:?}");
         assert!(lines.iter().any(|line| line.contains("可用: zenity, wl-copy")), "installed names listed: {lines:?}");
-        assert!(lines.iter().any(|line| line.contains("缺失: wl-paste（剪贴板读取）")), "missing + purpose: {lines:?}");
+        let joined = lines.join("");
+        assert!(joined.contains("缺失: kdialog（KDE 目录兜底）"), "kdialog listed with its KDE purpose");
+        assert!(joined.contains("wl-paste（剪贴板读取）"), "missing + purpose: {lines:?}");
         assert!(lines.iter().all(|line| !line.contains("=可用")), "old inline =state pairs are gone");
         assert!(lines.iter().all(|line| display_cols(line) <= PANEL_COLS), "helper block obeys the budget");
     }
@@ -1080,8 +1111,8 @@ mod tests {
         assert_eq!(fact_value(&text, "运行时来源"), Some("未设置"));
         assert_eq!(fact_value(&text, "运行时版本"), Some("不可用"));
         assert_eq!(fact_value(&text, "关闭窗口"), Some("关窗=退出"));
-        assert_eq!(fact_value(&text, "原生助手"), Some("0/5 可用"));
-        for (name, purpose) in [("zenity", "关于/选取面板"), ("wl-paste", "剪贴板读取"), ("xdg-open", "外链打开")] {
+        assert_eq!(fact_value(&text, "原生助手"), Some("0/6 可用"));
+        for (name, purpose) in [("zenity", "面板/目录兜底"), ("kdialog", "KDE 目录兜底"), ("wl-paste", "剪贴板读取"), ("xdg-open", "外链打开")] {
             assert!(text.contains(&format!("{name}（{purpose}）")), "missing helper {name} is reported");
         }
         assert!(!text.contains("data-platform"), "must never mention platform injection");
@@ -1119,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn about_uses_zenity_no_markup_and_no_new_plugin() {
+    fn about_uses_gtk_first_and_zenity_only_as_fallback() {
         let source = menu_source();
         let show = source
             .split("fn show_about")
@@ -1127,12 +1158,26 @@ mod tests {
             .and_then(|tail| tail.split("\n}\n").next())
             .expect("show_about must exist");
         assert!(show.contains("crate::dsh::info(app)"), "about must show real shell_info");
-        assert!(show.contains("Command::new(\"zenity\")"), "use the existing system helper");
+        assert!(show.contains("crate::picker::show_info"), "primary path is the self-drawn GTK panel");
+        assert!(show.contains("Command::new(\"zenity\")"), "zenity remains only as fallback");
         assert!(show.contains("--no-markup"), "untrusted paths must not be parsed as markup");
         assert!(show.contains("--no-wrap"), "GTK must never pick its own mid-word break points");
         assert!(show.contains("--width={PANEL_WIDTH}"), "the panel width comes from the shared constant");
-        assert!(show.contains(".spawn()"), "dialog must not block the main thread");
+        assert!(show.contains(".spawn()"), "zenity fallback must never block the async worker");
         assert!(show.contains("if let Err(error)"), "dialog failure must be logged");
+        assert!(
+            show.find("crate::picker::show_info").unwrap() < show.find("Command::new(\"zenity\")").unwrap(),
+            "GTK must be attempted before zenity"
+        );
+        let picker = include_str!("picker.rs");
+        let info = picker
+            .split("pub(crate) async fn show_info")
+            .nth(1)
+            .expect("picker::show_info must exist");
+        assert!(info.contains("run_on_main_thread"), "dialog must be created on the GTK thread");
+        assert!(info.contains("spawn_blocking"), "the command must wait from a blocking pool");
+        assert!(info.contains("mpsc::channel"), "result must cross a channel, never a blocking main thread");
+        assert!(info.contains("wrap_mode(gtk::WrapMode::None)"), "no mid-word rewrap of pre-wrapped text");
         let handler = source
             .split("ABOUT_ID =>")
             .nth(1)

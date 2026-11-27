@@ -12,7 +12,7 @@
 
 **目标层**：本项目以 Linux 为第一优先、深度支持——优先支持各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好，Linux 是唯一完成适配与验证的平台；Windows / macOS 提供桌面端基础支持——能构建、能运行即可，不做深入适配与优化，建议直接从官方渠道下载 DeepSeek Harness 官方桌面版本，本项目的 Tauri 壳不作为 Win/Mac 用户的首选方案；移动端（iOS / Android）不支持——架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
-> **现状层（如实说明）**：Linux 是唯一完成适配与验证的平台（当前代码依赖 Linux 原生命令 `zenity` / `wl-clipboard` / `notify-send`，且只在 Linux + WebKitGTK 2.52 上验证过；多发行版兼容仍是目标，不代表已全面验证）。Windows / macOS 提供基础支持、能构建能运行，但不做深入适配与优化，未做全面验证；移动端（iOS / Android）明确不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
+> **现状层（如实说明）**：Linux 是唯一完成适配与验证的平台（关于面板与目录选择主路径为自绘 GTK3，`zenity` / `kdialog` 仅兜底；`wl-clipboard` / `notify-send` 为可选增强，目前主要在 Linux + WebKitGTK 2.52 上验证过；多发行版兼容仍是目标，不代表已全面验证）。Windows / macOS 提供基础支持、能构建能运行，但不做深入适配与优化，未做全面验证；移动端（iOS / Android）明确不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
 ### 和「把 Electron 应用塞进 Tauri」有什么不同
 
@@ -88,15 +88,27 @@ docs/DEVELOPMENT.md         开发与验证手册
 ## 3. 依赖与安装
 
 - Node 24+（在 PATH 里，或 `DSH_TAURI_NODE` 指定）
-- Rust 1.9x、`webkit2gtk-4.1`、`libsoup-3.0`、`librsvg2`、`libayatana-appindicator3`、`patchelf`
-- 运行时助手：`zenity`（目录选择 / 关于面板）、`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）
-- Debian / Ubuntu 的 `.deb` 包已在 `bundle.linux.deb.depends` 中声明这 4 个助手，安装时一并拉取，开箱即用；AppImage 与源码运行需自行安装：
+- **硬依赖（缺了起不来）**：Rust 1.9x、GTK3 / `webkit2gtk-4.1` / `libsoup-3.0` / `librsvg2` / `libayatana-appindicator3`（Tauri + WebKitGTK + 托盘决定）、构建用 `patchelf`；关于面板与目录选择主路径都是外壳自绘 GTK3，不依赖外部对话框程序
+- **可选增强（缺了对应功能降级）**：`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）、`zenity` / `kdialog`（对话框兜底链 GTK → zenity → kdialog；KDE 系常用 kdialog）
+- Debian / Ubuntu 的 `.deb` 包已在 `bundle.linux.deb.depends` 中声明 `zenity`/`wl-clipboard`/`libnotify-bin`/`xdg-utils`，安装时一并拉取；AppImage 与源码运行需自行安装：
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin xdg-utils
+  zenity kdialog wl-clipboard libnotify-bin xdg-utils
 ```
+
+其他发行版包名（官方包名；KVM 实测结论见 [docs/COMPAT_MATRIX.md](COMPAT_MATRIX.md)）：
+
+| 发行版 | 硬依赖（构建/运行库） | 可选增强（助手） |
+| --- | --- | --- |
+| Debian / Ubuntu（apt） | `libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev` | `zenity kdialog wl-clipboard libnotify-bin xdg-utils` |
+| Fedora（dnf，42 实测） | `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel gtk3-devel`；AppImage 另需 `fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11`（实测装完 ldd 无 not found）。`libayatana-appindicator3(-devel)` 在 Fedora 42 仓库 **NOT_FOUND**，只有 ABI 不同的 `libappindicator-gtk3(-devel)`：托盘不保证可用，待上游换后端 | `zenity kdialog wl-clipboard libnotify xdg-utils`（最小安装全缺；`kdialog` 是独立包） |
+| Arch（pacman，官方包数据库核验；VM 未启动成功，非真机实测） | `webkit2gtk-4.1 gtk3 libayatana-appindicator libsoup3 librsvg`（Arch 有 ayatana 版） | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+| openSUSE（zypper） | `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel libayatana-appindicator3-devel` | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+| Alpine（apk） | `webkit2gtk-4.1-dev libsoup3-dev librsvg-dev`（musl 上 WebKitGTK 支持有限，**不承诺可用**） | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+
+三者全不可用时，目录选择返回可操作错误并列出对应包管理器安装命令。
 
 ## 4. 构建与用法
 

@@ -112,7 +112,78 @@ async fn zenity_pick(title: String) -> Result<Option<String>, String> {
         .map_err(|error| format!("zenity 目录任务失败：{error}"))?
 }
 
-/// Serve one pick from the GTK dialog, falling back to zenity.
+/// Run the `kdialog` KDE fallback and normalize its answer.
+///
+/// KDE's helper prints the chosen directory on stdout and, like zenity,
+/// returns 1 when the user cancels. The cancel semantics were cross-checked
+/// against KDE's shell-scripting guide and independent kdialog usage notes
+/// (`https://develop.kde.org/docs/administration/kdialog/`,
+/// `https://www.linux.org/threads/kdialog-kde-gui-for-scripts.10023`); exit 1
+/// is compared numerically, never by parsing stderr (which is localized).
+/// The mode flag and its start-directory argument come first, followed by
+/// `--title <title>` (the exact argv is covered by a pure unit test). The KDE
+/// documentation gives the general return-code rule; the exact "1 = Cancel"
+/// value for `--getexistingdirectory` still needs a real KDE run. This machine
+/// has no kdialog, so real KDE
+/// interaction is not claimed here; a stub in PATH verifies the call shape.
+pub(crate) fn kdialog_args(start: &str, title: &str) -> Vec<String> {
+    vec![
+        "--getexistingdirectory".to_owned(),
+        start.to_owned(),
+        "--title".to_owned(),
+        title.to_owned(),
+    ]
+}
+
+fn kdialog_dialog(title: &str) -> Result<Option<String>, String> {
+    let start = crate::runtime::home_dir();
+    let args = kdialog_args(&start.to_string_lossy(), title);
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    match run_helper("kdialog", &argv, Some(1)) {
+        HelperOutcome::Ok(stdout) => Ok(picked_path(&stdout)),
+        HelperOutcome::Cancelled => Ok(None),
+        HelperOutcome::Failed(error) => Err(error),
+    }
+}
+
+/// `kdialog` fallback on the blocking pool (same reason as `zenity_pick`).
+async fn kdialog_pick(title: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || kdialog_dialog(&title))
+        .await
+        .map_err(|error| format!("kdialog 目录任务失败：{error}"))?
+}
+
+/// Error text when no dialog implementation could be used. Names the packages
+/// for common distributions so the user can fix the problem without guessing.
+pub(crate) fn no_picker_error(gtk: &str, zenity: &str, kdialog: &str) -> String {
+    format!(
+        "目录选择不可用：自绘 GTK 对话框失败（{gtk}）、zenity 失败（{zenity}）、kdialog 失败（{kdialog}）。\\n\
+         请安装 GTK3（Debian/Ubuntu: libgtk-3-0；Fedora: gtk3；Arch: gtk3；openSUSE: gtk3-libgtk3-0），\\n\
+         或装一个兜底助手：Debian/Ubuntu apt install zenity 或 kdialog；\\n\
+         Fedora dnf install zenity 或 kdialog；Arch pacman -S zenity 或 kdialog；\\n\
+         openSUSE zypper install zenity 或 kdialog；Alpine apk add zenity 或 kdialog\\n\
+         （Alpine 用 musl，WebKitGTK 支持有限，本外壳不承诺可用）。"
+    )
+}
+
+/// Try zenity, then kdialog; both run on the blocking pool.
+async fn helper_pick(title: String) -> Result<Option<String>, String> {
+    let zenity_error = match zenity_pick(title.clone()).await {
+        Ok(selection) => return Ok(selection),
+        Err(error) => error,
+    };
+    eprintln!("[dsh-tauri] zenity 目录对话框不可用，回退 kdialog：{zenity_error}");
+    match kdialog_pick(title).await {
+        Ok(selection) => Ok(selection),
+        Err(kdialog_error) => {
+            let error = no_picker_error("见日志", &zenity_error, &kdialog_error);
+            eprintln!("[dsh-tauri] {error}");
+            Err(error)
+        }
+    }
+}
+
+/// Serve one pick from the GTK dialog, falling back to zenity then kdialog.
 #[cfg(target_os = "linux")]
 async fn pick_with_native(app: &AppHandle, title: String) -> Result<Option<String>, String> {
     match crate::picker::source_from_env(std::env::var(crate::picker::PICKER_ENV).ok().as_deref()) {
@@ -121,22 +192,22 @@ async fn pick_with_native(app: &AppHandle, title: String) -> Result<Option<Strin
                 "[dsh-tauri] {} 指定 zenity：跳过 GTK 目录对话框",
                 crate::picker::PICKER_ENV
             );
-            zenity_pick(title).await
+            helper_pick(title).await
         }
         crate::picker::Source::Gtk => match crate::picker::choose(app, title.clone()).await {
             Ok(selection) => Ok(selection),
             Err(error) => {
-                eprintln!("[dsh-tauri] GTK 目录对话框不可用，回退 zenity：{error}");
-                zenity_pick(title).await
+                eprintln!("[dsh-tauri] GTK 目录对话框不可用，回退 zenity/kdialog：{error}");
+                helper_pick(title).await
             }
         },
     }
 }
 
-/// Off Linux there is no GTK dialog to drive: zenity is the only implementation.
+/// Off Linux there is no GTK dialog to drive: zenity/kdialog are the only paths.
 #[cfg(not(target_os = "linux"))]
 async fn pick_with_native(_app: &AppHandle, title: String) -> Result<Option<String>, String> {
-    zenity_pick(title).await
+    helper_pick(title).await
 }
 
 /// Folder chooser for the workspace picker (`__DSH_DIRECTORY_PICKER__`).
@@ -409,9 +480,9 @@ const MENU_SURFACE_FALLBACK_SCRIPT: &str = r#"
 #[cfg(test)]
 mod tests {
     use super::{
-        external_url_allowed, menu_fallback_injection, menu_surface_fallback_css,
-        menu_surface_fallback_script, notify_args, picked_path, status_message, title_window_label,
-        write_error_message, HelperOutcome, MENU_SURFACE_CSS_PLACEHOLDER,
+        external_url_allowed, kdialog_args, menu_fallback_injection, menu_surface_fallback_css,
+        menu_surface_fallback_script, no_picker_error, notify_args, picked_path, status_message,
+        title_window_label, write_error_message, HelperOutcome, MENU_SURFACE_CSS_PLACEHOLDER,
         MENU_SURFACE_FALLBACK_SCRIPT,
     };
 
@@ -503,6 +574,35 @@ mod tests {
         assert!(!external_url_allowed("https"));
         assert!(!external_url_allowed("mailto"));
         assert!(!external_url_allowed("httpsx://example.com"));
+    }
+
+    #[test]
+    fn kdialog_argv_uses_getexistingdirectory_with_start_and_title() {
+        assert_eq!(
+            kdialog_args("/home/tester", "选择目录"),
+            vec![
+                "--getexistingdirectory".to_owned(),
+                "/home/tester".to_owned(),
+                "--title".to_owned(),
+                "选择目录".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_picker_error_names_distribution_packages() {
+        let error = no_picker_error("见日志", "无 zenity", "无 kdialog");
+        assert!(error.contains("目录选择不可用"), "problem is stated: {error}");
+        for needle in [
+            "dnf install zenity",
+            "pacman -S zenity",
+            "zypper install zenity",
+            "apk add zenity",
+            "kdialog",
+            "musl",
+        ] {
+            assert!(error.contains(needle), "missing actionable hint {needle}: {error}");
+        }
     }
 
     #[test]

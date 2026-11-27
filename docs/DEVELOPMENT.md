@@ -5,8 +5,9 @@
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
 | 服务监督 | `src-tauri/src/supervisor.rs` | spawn `dsh web`、从 stdout 解析 URL、崩溃重启、SIGTERM 退出 |
-| 原生能力 | `src-tauri/src/native.rs` | 目录选择、剪贴板、通知、外链、窗口标题 + 注入脚本 |
-| 外壳 | `src-tauri/src/shell_ui.rs` | 窗口、菜单、托盘、窗口状态、错误页、几何裁剪 |
+| 原生能力 | `src-tauri/src/native.rs` | 目录选择兜底链（GTK → zenity → kdialog）、剪贴板、通知、外链、窗口标题 + 注入脚本 |
+| 自绘 GTK 对话框 | `src-tauri/src/picker.rs` | 目录选择（隐藏文件可见 + 路径框）与只读运行状态面板；主线程建窗 + async 命令 + mpsc/spawn_blocking 等待 |
+| 外壳 | `src-tauri/src/shell_ui.rs` | 窗口、菜单、托盘、窗口状态、错误页、几何裁剪、关于面板文本排版与 6 助手 PATH 自检 |
 | 单实例 | `src-tauri/src/single_instance.rs` | `$XDG_RUNTIME_DIR/dsh-tauri.sock` |
 
 ## 验证命令
@@ -60,6 +61,8 @@ CI 亦执行 `test:clean` / `test:unit` / `test:contract` 三项。
 `npm run verify:e2e` 则在 `verify:all` 之后再跑一遍真运行时探针（`test:clean` 包装脚本）：
 每次在运行中自动建工作区内临时目录 `.dsh-probe-<pid>` 作为 `DSH_HOME`，结束时
 自动删除，不碰 `~/.dsh`，失败或中断也不会留下残留。
+
+Linux 多发行版依赖分「硬依赖」（GTK3 / webkit2gtk-4.1 / libsoup-3.0 / librsvg2 / libayatana-appindicator3，缺了起不来）与「可选增强」（wl-clipboard / notify-send / xdg-open / zenity / kdialog，缺了对应功能降级）；apt / dnf / pacman / zypper / apk 包名见 README「依赖」段，KVM 实测矩阵见 `docs/COMPAT_MATRIX.md`（Fedora 42 已实测：`libayatana-appindicator3` 仓库 NOT_FOUND，托盘不保证可用，待上游换后端；AppImage 还需补 8 个系统库；Arch 仅官方包数据库核验、VM 未启动成功）。对话框兜底链为 GTK 自绘 → zenity → kdialog，kdialog 取消按退出码 1 判定（KDE 官方脚本说明；本机无 kdialog，真机交互未在本机验证）。
 
 桌面桥接的精确契约，以及「`dshDesktop` 明确不实现」的决策与理由，见
 [`docs/DESKTOP_BRIDGE.zh.md`](DESKTOP_BRIDGE.zh.md)。

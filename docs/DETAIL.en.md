@@ -88,15 +88,27 @@ docs/DEVELOPMENT.md         开发与验证手册
 ## 3. Dependencies and Installation
 
 - Node 24+ (on PATH, or specified by `DSH_TAURI_NODE`)
-- Rust 1.9x, `webkit2gtk-4.1`, `libsoup-3.0`, `librsvg2`, `libayatana-appindicator3`, `patchelf`
-- Runtime helpers: `zenity` (directory picker / About panel), `wl-clipboard` (clipboard), `libnotify-bin` (`notify-send` notifications), `xdg-utils` (`xdg-open` external links)
-- The Debian / Ubuntu `.deb` package declares all four helpers in `bundle.linux.deb.depends`, so they are pulled in at install time and work out of the box; AppImage and source runs require installing them manually:
+- **Hard dependencies (missing = no start)**: Rust 1.9x, GTK3 / `webkit2gtk-4.1` / `libsoup-3.0` / `librsvg2` / `libayatana-appindicator3` (required by Tauri + WebKitGTK + tray), plus `patchelf` to build; the About panel and directory picker are both self-drawn GTK3 and need no external dialog program
+- **Optional enhancements (degraded when missing)**: `wl-clipboard` (clipboard), `libnotify-bin` (`notify-send` notifications), `xdg-utils` (`xdg-open` links), `zenity` / `kdialog` (dialog fallback chain GTK → zenity → kdialog; KDE distributions usually provide kdialog)
+- The Debian / Ubuntu `.deb` declares `zenity`/`wl-clipboard`/`libnotify-bin`/`xdg-utils` in `bundle.linux.deb.depends`; AppImage and source runs need manual installation:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin xdg-utils
+  zenity kdialog wl-clipboard libnotify-bin xdg-utils
 ```
+
+Package names on other distributions (official names; KVM results are recorded in [docs/COMPAT_MATRIX.md](COMPAT_MATRIX.md)):
+
+| Distribution | Hard dependencies (libs/build) | Optional helpers |
+| --- | --- | --- |
+| Debian / Ubuntu (apt) | `libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev` | `zenity kdialog wl-clipboard libnotify-bin xdg-utils` |
+| Fedora (dnf, Fedora 42 measured) | `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel gtk3-devel`; AppImage also needs `fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11` (ldd clean afterwards). `libayatana-appindicator3(-devel)` is **NOT_FOUND** in Fedora 42 repos; only ABI-incompatible `libappindicator-gtk3(-devel)` exists, so tray support is **not guaranteed**, pending an upstream backend change | `zenity kdialog wl-clipboard libnotify xdg-utils` (all missing in a minimal install; `kdialog` is a standalone package) |
+| Arch (pacman, official package database verified; VM did not boot — not a runtime test) | `webkit2gtk-4.1 gtk3 libayatana-appindicator libsoup3 librsvg` (Arch has the ayatana fork) | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+| openSUSE (zypper) | `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel libayatana-appindicator3-devel` | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+| Alpine (apk) | `webkit2gtk-4.1-dev libsoup3-dev librsvg-dev` (WebKitGTK on musl is limited; **not supported**) | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+
+When all three dialog paths fail, the picker returns an actionable error listing the installation commands for your package manager.
 
 ## 4. Build and Usage
 

@@ -52,15 +52,29 @@ Tauri 只提供系统 WebView 和 Rust 后端，不带 Node 运行时。所以�
 ## 依赖
 
 - Node 24+（在 PATH 里，或 `DSH_TAURI_NODE` 指定）
-- Rust 1.9x、`webkit2gtk-4.1`、`libsoup-3.0`、`librsvg2`、`libayatana-appindicator3`、`patchelf`
-- 运行时助手：`zenity`（关于面板；目录选择已改用外壳自绘的 GTK3 原生对话框，zenity 只作降级兜底）、`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）
-- Debian / Ubuntu 的 `.deb` 包已在 `bundle.linux.deb.depends` 中声明这 4 个助手，安装时一并拉取，开箱即用；AppImage 与源码运行需自行安装：
+- **硬依赖（缺了起不来）**：Rust 1.9x、GTK3 / `webkit2gtk-4.1` / `libsoup-3.0` / `librsvg2` / `libayatana-appindicator3`（Tauri + WebKitGTK + 托盘决定，发行版包名见下表）、构建用 `patchelf`；关于面板与目录选择主路径都是外壳自绘 GTK3，不依赖外部对话框程序
+- **可选增强（缺了对应功能降级）**：`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）、`zenity` / `kdialog`（对话框兜底链 GTK → zenity → kdialog；KDE 系通常用 kdialog）
+- Debian / Ubuntu 的 `.deb` 包已在 `bundle.linux.deb.depends` 中声明 `zenity`/`wl-clipboard`/`libnotify-bin`/`xdg-utils`，安装时一并拉取；AppImage 与源码运行需自行安装：
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
   libayatana-appindicator3-dev patchelf build-essential \
-  zenity wl-clipboard libnotify-bin xdg-utils
+  zenity kdialog wl-clipboard libnotify-bin xdg-utils
 ```
+
+其他发行版包名（按包管理器分组；官方包名，KVM 实测结论见 [docs/COMPAT_MATRIX.md](docs/COMPAT_MATRIX.md)，未实测处会随实测更新）：
+
+| 发行版 | 硬依赖（构建/运行库） | 可选增强（助手） |
+| --- | --- | --- |
+| Debian / Ubuntu（apt） | `libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev` | `zenity kdialog wl-clipboard libnotify-bin xdg-utils` |
+| Fedora（dnf，42 实测） | `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel gtk3-devel`；AppImage 另需 `fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11`（实测装完 ldd 无 not found）。`libayatana-appindicator3(-devel)` 在 Fedora 42 仓库 **NOT_FOUND**，只有 ABI 不同的 `libappindicator-gtk3(-devel)`：托盘不保证可用，待上游换后端 | `zenity kdialog wl-clipboard libnotify xdg-utils`（最小安装 6 项命令全缺，dnf 安装 exit 0、命令路径未复验；`kdialog` 是独立包） |
+| Arch（pacman，官方包数据库核验；VM 未启动成功，非真机实测） | `webkit2gtk-4.1 gtk3 libayatana-appindicator libsoup3 librsvg`（Arch 有 ayatana 版） | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+| openSUSE（zypper） | `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel libayatana-appindicator3-devel` | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+| Alpine（apk） | `webkit2gtk-4.1-dev libsoup3-dev librsvg-dev`（musl 上 WebKitGTK 支持有限，**不承诺可用**） | `zenity kdialog wl-clipboard libnotify xdg-utils` |
+
+三者全不可用时，目录选择会返回可操作错误：说明 GTK 与 zenity/kdialog 都失败，并列出上表对应包管理器安装命令。
+
+**已知发行版硬限制**：Fedora/RHEL 系仓库没有 `libayatana-appindicator3`（只有 ABI 不同的 `libappindicator-gtk3`），托盘图标不保证可用，待上游换后端；AppImage 在最小 Fedora 上还需补齐 8 个系统库，详见 `docs/COMPAT_MATRIX.md` 的实测记录。
 
 ## 构建与运行
 
@@ -148,7 +162,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | --- | --- |
 | 会话 / 工作区 / 插件 | 官方 Web UI，加载自 `dsh web` |
 | 目录选择、剪贴板、通知、外链 | 注入脚本 + Tauri 命令 |
-| 目录选择对话框 | `picker.rs`：GTK3 原生对话框（隐藏文件默认可见、常驻路径输入框），经主线程运行；失败或 `DSH_TAURI_PICKER=zenity` 时回退 `zenity` |
+| 目录选择对话框 | `picker.rs`：GTK3 原生对话框（隐藏文件默认可见、常驻路径输入框），经主线程运行；失败或 `DSH_TAURI_PICKER=zenity` 时按 zenity → kdialog 兜底，全失败返回可操作错误 |
 | 窗口标题、尺寸、托盘、单实例 | `shell_ui.rs` / `single_instance.rs` |
 | 崩溃自动重启 | `supervisor.rs`，最多 3 次后错误页 |
 | 运行时安装/更新 | 自动（首次启动安装，启动后自动检查更新） |
@@ -169,7 +183,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 - 认证链路：token URL → 303 + `dsh-auth-*` cookie → `GET /` 返回客户端 HTML（`tools/probe-web.mjs`）；
 - 窗口里是完整 Web UI：会话列表、工作区、模型选择、插件页、正在进行的会话流都在；
 - 窗口会随 `document.title` 改名；关闭按偏好走「关到托盘」或「退出」（偏好在 `~/.dsh/desktop-preferences.json` 的 `closeToTray` 字段：`true`=关到托盘，`false`=退出，缺省 `true`）；窗口几何（尺寸、位置、最大化状态）记在 `~/.dsh/dsh-tauri-window-state.json`，下次启动从这里恢复；
-- 菜单「DSH → 关于 → 关于 dsh-tauri」是运行状态面板（zenity 非阻塞）：展示运行时来源档位与版本、自动更新状态、`closeToTray` 关窗语义、5 个原生助手的只读 PATH 可用性、SHIM 协议 1 与桥接事实；
+- 菜单「DSH → 关于 → 关于 dsh-tauri」是运行状态面板（自绘 GTK，zenity 仅降级）：展示运行时来源档位与版本、自动更新状态、`closeToTray` 关窗语义、6 个原生助手（含 kdialog）的只读 PATH 可用性、SHIM 协议 1 与桥接事实；
 - 第二次启动会聚焦已有窗口后退出，不会起第二个服务；
 - 服务被杀后自动重启（最多 3 次），仍失败则显示可读的错误页；
 - 首次启动没有运行时会自动 `npm install` 到 `~/.dsh/dsh-tauri/runtime`，
@@ -178,7 +192,7 @@ docs/DEVELOPMENT.md         开发与验证手册
   正在跑的服务不受影响；
 - `DSH_TAURI_OFFLINE=1` 且本地无运行时，显示带手动命令的错误页而不是空白窗口；
 - 更新走 `<runtime>.new-<pid>` 暂存目录 + 原子替换，安装中断不会破坏已装好的运行时。
-- 八层离线验证 + 真运行时探针：`npm run verify:fast`（语法 / 文档计数 / 版本 / 本地化 / 链接 / 命令注册 / npm 单测 / 桥接契约守卫）、`npm test`（真运行时契约探针）；npm 单测为注入脚本、CLI、错误页与启动页单测，28 项（含重定向门禁 2 项）；桥接契约守卫为上游桥接漂移守卫，13 项静态检查（含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）；Rust 单测 214 项；CI 全部执行。
+- 八层离线验证 + 真运行时探针：`npm run verify:fast`（语法 / 文档计数 / 版本 / 本地化 / 链接 / 命令注册 / npm 单测 / 桥接契约守卫）、`npm test`（真运行时契约探针）；npm 单测为注入脚本、CLI、错误页与启动页单测，28 项（含重定向门禁 2 项）；桥接契约守卫为上游桥接漂移守卫，13 项静态检查（含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）；Rust 单测 216 项；CI 全部执行。
 
 ## 已知限制
 
