@@ -1,8 +1,10 @@
 # 更新记录
 
-## 0.7.2（2026-11-28）
+## 0.8.0（2026-11-28）
 
 - **改进：去 zenity 化 + KDE 兜底 + 多发行版依赖文档**：关于/运行状态面板改用自绘 GTK3 对话框（复用 picker.rs 的主线程建窗 + async 命令 + mpsc/spawn_blocking 线程模型，保持 about_text 的 64 列排版，zenity 仅作降级），目录选择兜底链扩为 GTK → zenity → kdialog → 可操作错误（列出 apt/dnf/pacman/zypper/apk 安装命令；kdialog 取消按退出码 1 判定，KDE 官方脚本说明，本机无 kdialog 未做真机交互）；助手自检增加 kdialog（6 项）；README 与 7 语言 DETAIL 依赖段区分硬依赖（GTK3/webkit2gtk-4.1/libsoup-3.0/librsvg2/appindicator）与可选增强（wl-clipboard/notify-send/xdg-open/zenity/kdialog），补 dnf/pacman/zypper/apk 包名并引用 COMPAT_MATRIX 实测；DEVELOPMENT 与 DESKTOP_BRIDGE 同步。新增 2 项 Rust 单测（kdialog argv 与错误提示文案），总数 216。Fedora 42 KVM 实测：最小安装缺 10 个库，`dnf install fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11`（exit 0）后 ldd 无 not found，headless 下 GTK backend panic 属预期；`libayatana-appindicator3` NOT_FOUND（只有 ABI 不同的 `libappindicator-gtk3`），Fedora/RHEL 系托盘不保证可用，待上游换后端；助手包安装 exit 0 但命令路径未复验。Arch 官方包数据库核验 `webkit2gtk-4.1` / `libayatana-appindicator`（Arch 有 ayatana 版）/ `zenity` / `kdialog` / `wl-clipboard` / `libnotify` / `xdg-utils` 均存在，VM 因 cloud-init 未生效启动失败，不写成真机实测。
+
+## 0.7.2（2026-11-28）
 
 - **修复：关 DMABUF 后菜单透字（按需注入近不透明菜单表面）**：v0.7.1 为治 WebKit fd 泄漏在 NVIDIA 上关闭 DMABUF 渲染器后，视图走软件渲染路径、`backdrop-filter` 被整段忽略，而上游菜单表面 `--dsw-menu-surface-fill` 仍是 0.64 透明度 → 玻璃菜单退化为「半透明色块 + 清晰透字」。外壳侧按需兜底：只在 `main::dmabuf_renderer_disabled()` 为真时，向主窗口初始化脚本追加一个 `<style>`（在 `native::SHIM` 之后追加一次 `initialization_script`，SHIM 注入点与契约不变），把 `--dsw-menu-surface-fill` 提到 0.94（暗 `rgba(48,49,54,0.94)` / 亮 `rgba(252,253,254,0.94)`，暗色沿用上游 `body[data-ds-dark-theme]` 判定、加 `html` 前缀保证优先级）并把 `--dsw-menu-backdrop-filter` 置 `none`；`WEBKIT_DISABLE_DMABUF_RENDERER=0` 等开启 DMABUF 的机器不注入、玻璃保留。CSS 生成与脚本拼装为纯函数（`native::menu_surface_fallback_css` / `menu_fallback_injection`），flag=false 时返回空脚本、完全不注入；4 项单测覆盖两套主题、两条分支与 JSON 转义，上游改 token 名只会静默失效。实测（独立实例 + 私有 `XDG_RUNTIME_DIR` + 静态玻璃页回读 computed token，同 task-399 的像素法）：关 DMABUF 时 `fill=rgba(48,49,54,0.94)`、`filter=none`、注入 1 个 style，面板内 Δ(p95-p5)=14.0；同路径强制 token 保持 0.64（=修复前）Δ=87.0；关为 0 时未注入、`fill=rgba(48,49,54,0.64)`、`filter=blur(40px) saturate(150%)`、Δ=7.0。Rust 单测总数 214。
 
