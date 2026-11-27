@@ -12,7 +12,15 @@
  * Exits 0 on a known/green baseline, 1 only when a new hard-throw appears,
  * when the shell writes data-platform, when a SHIM injection point is
  * missing, when withGlobalTauri is not true, or when the shell injects a
- * dshDesktop global. Runtime absent => one SKIP line, exit 0.
+ * dshDesktop global.
+ *
+ * Runtime absent (offline/CI before install): the contract checks cannot run.
+ * Default exit stays 0 so offline base gates remain usable, but the output is
+ * explicitly marked "STATUS: SKIPPED" and the SUMMARY line carries
+ * "(SKIPPED: ...; N contract checks NOT executed)" — never a bare "0 FAILS"
+ * that could be mistaken for a pass. Pass --strict (or set
+ * DSH_TAURI_REQUIRE_BRIDGE=1) to promote that SKIP to FAIL/exit 1 in
+ * environments that expect the runtime to be installed.
  * GUARD_CHECK_COUNT must match the number of emit() calls, enforced by the
  * end-of-file self-check.
  */
@@ -39,9 +47,25 @@ const emit = (status, name, evidence = '') => {
 const rel = (p) => relative(root, p).split('\\').join('/');
 
 // Offline/CI: no installed runtime client packages, nothing to guard.
+// Default: loud SKIP (exit 0) so the other offline gates still run.
+// Strict: the same condition is a FAIL, for setups that installed the runtime.
+const strict = process.argv.includes('--strict') ||
+  /^(?:1|true|yes|on)$/i.test(process.env.DSH_TAURI_REQUIRE_BRIDGE ?? '');
 if (!existsSync(runtimeRoot) || !existsSync(join(runtimeRoot, 'dsh-web-frontend')) ||
     !readdirSync(runtimeRoot).some((name) => name.startsWith('dsh-client-'))) {
-  console.log(`SKIP bridge contract guard: runtime client packages not found at ${rel(runtimeRoot)} (offline/CI)`);
+  const missing = `runtime client packages not found at ${rel(runtimeRoot)}`;
+  const installHint = 'npm install --prefix runtime @deepseek-ai/dsh';
+  if (strict) {
+    console.error(`FAIL bridge contract guard: ${missing} (--strict / DSH_TAURI_REQUIRE_BRIDGE=1)`);
+    console.error(`  ${GUARD_CHECK_COUNT} contract checks were NOT executed; install with: ${installHint}`);
+    console.error(`SUMMARY: 0 checks, 1 FAILS (SKIPPED: ${missing}; promoted to FAIL by strict mode)`);
+    process.exit(1);
+  }
+  console.log(`SKIP bridge contract guard: ${missing} (offline/CI)`);
+  console.log(`  ${GUARD_CHECK_COUNT} contract checks were NOT executed — this is NOT a PASS.`);
+  console.log(`  To execute them: ${installHint}`);
+  console.log(`SUMMARY: 0 checks, 0 FAILS (SKIPPED: ${missing}; ${GUARD_CHECK_COUNT} contract checks NOT executed)`);
+  console.log('STATUS: SKIPPED (bridge contract NOT verified)');
   process.exit(0);
 }
 
