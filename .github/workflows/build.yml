@@ -51,6 +51,9 @@ jobs:
       - name: Check command registrations
         run: npm run check:commands
 
+      - name: Check capabilities
+        run: npm run check:capabilities
+
       - name: Install the Tauri CLI
         run: npm ci
 
