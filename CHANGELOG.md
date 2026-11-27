@@ -1,6 +1,6 @@
 # 更新记录
 
-## [未发布]
+## 0.7.0（2026-11-27）
 
 - **窗口几何记忆路径文档与守卫**：README 与七语言详情页写明窗口状态文件 `~/.dsh/dsh-tauri-window-state.json` 的位置与作用（记录尺寸、位置与最大化状态，下次启动据此恢复，不写死 uid、不随 `DSH_HOME` 改变）；文档守卫只读校验 `shell_ui.rs::state_path()` 中 `".dsh"` 与 `"dsh-tauri-window-state.json"` 两个字面量未变，并核对八处文档路径一致，防止几何记忆静默失效。
 - **调查记录（未修复）**：记录 Linux/Wayland 下窗口放大后 L 形黑边的实机结论——现象为右侧/底部纯黑、WebView 绘制面停在旧尺寸；根因是 WebKitGTK 2.52.6 + Wayland + `GtkBox` 下 `set_bounds` 不触发绘制面高度重分配且冷启动不触发 `Resized`；已证伪 `set_size` 自激（崩溃）与 `queue_resize`（只修横向、纵向恒定）两个方案；第三个方向「导航完成后有界 `size_allocate`」经 task-384 只读论证同样判定不可行（父容器 allocation 同尺寸调用极可能 no-op、更强 `queue_resize` 已实机纵向无效，冷启动最大化恢复时导航完成点父容器尺寸未定、覆盖不到最终 configure），外壳侧无可靠修法，应等待 WebKitGTK / wry 上游修复。方案 A 的未提交代码已还原，此问题仍为已知问题、未修复（详见 `docs/DEVELOPMENT.md`）。
