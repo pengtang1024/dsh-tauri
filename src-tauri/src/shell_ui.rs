@@ -485,6 +485,13 @@ fn navigate_error_message(error: &str) -> String {
     format!("[dsh-tauri] 无法在主窗口打开服务 URL：{error}")
 }
 
+/// Readable error-page text shared by the navigate and build failure paths.
+/// Kept pure so the wording and the original error are testable without a
+/// live WebView.
+fn show_url_failed_message(error: &str) -> String {
+    format!("无法打开 DSH 界面：{error}\n\n请重试；如果仍然失败，在终端里手动运行 `dsh web` 查看完整日志。")
+}
+
 /// Open the window on the server URL, or navigate the existing one after a
 /// restart. The splash is destroyed once the real UI is up.
 pub fn show_url(app: &AppHandle<Wry>, url: &str) -> Result<(), String> {
@@ -494,12 +501,25 @@ pub fn show_url(app: &AppHandle<Wry>, url: &str) -> Result<(), String> {
         if let Some(window) = handle.get_webview_window("main") {
             if let Err(error) = window.navigate(parsed) {
                 eprintln!("{}", navigate_error_message(&error.to_string()));
+                // The splash must not keep spinning after a failed navigation.
+                // Stay on this main thread: show_error builds a window and
+                // Tauri only allows that from the main thread.
+                let message = show_url_failed_message(&error.to_string());
+                crate::progress::fail(message.clone());
+                if let Err(error) = show_error(&handle, &message) {
+                    eprintln!("[dsh-tauri] cannot show the error window: {error}");
+                }
             }
             let _ = window.set_focus();
             return;
         }
         if let Err(error) = build_main_window(&handle, parsed) {
             eprintln!("[dsh-tauri] {error}");
+            let message = show_url_failed_message(&error);
+            crate::progress::fail(message.clone());
+            if let Err(error) = show_error(&handle, &message) {
+                eprintln!("[dsh-tauri] cannot show the error window: {error}");
+            }
         }
     })
     .map_err(|error| format!("cannot reach the main thread: {error}"))
@@ -586,7 +606,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_version, encode_state, geometry_is_sane, helper_in_path, menu_window_label, navigate_error_message, resized_event_is_noop, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_version, encode_state, geometry_is_sane, helper_in_path, menu_window_label, navigate_error_message, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -1040,5 +1060,39 @@ mod tests {
         assert!(!branch.contains("set_size"), "Resized must not write native size");
         assert!(!branch.contains("set_bounds"), "Resized must not write native bounds");
         assert!(branch.contains("window.dispatchEvent"), "page resize event must remain");
+    }
+
+    #[test]
+    fn show_url_failed_message_keeps_error_and_manual_command() {
+        let message = show_url_failed_message("cannot open the window: no display");
+        assert!(message.contains("cannot open the window: no display"), "error lost: {message}");
+        assert!(message.contains("dsh web"), "manual command missing: {message}");
+    }
+
+    #[test]
+    fn show_url_failure_branches_replace_the_splash_with_an_error_page() {
+        // Static guard: both failures inside show_url's main-thread closure
+        // must mark the progress state as failed and call show_error there,
+        // otherwise the splash keeps spinning with no visible explanation.
+        let source = include_str!("shell_ui.rs");
+        let start = source.find("pub fn show_url").expect("show_url must exist");
+        let tail = &source[start..];
+        let end = tail.find("\n/// Show a readable failure page").expect("show_url must end before show_error");
+        let body = &tail[..end];
+
+        let navigate = body
+            .split("if let Err(error) = window.navigate(parsed)")
+            .nth(1)
+            .and_then(|tail| tail.split("let _ = window.set_focus()").next())
+            .expect("navigate failure branch must exist");
+        assert!(navigate.contains("show_error(&handle"), "navigate failure must show the error page");
+        assert!(navigate.contains("progress::fail"), "navigate failure must end boot progress");
+
+        let build = body
+            .split("if let Err(error) = build_main_window(&handle, parsed)")
+            .nth(1)
+            .expect("build failure branch must exist");
+        assert!(build.contains("show_error(&handle"), "build failure must show the error page");
+        assert!(build.contains("progress::fail"), "build failure must end boot progress");
     }
 }

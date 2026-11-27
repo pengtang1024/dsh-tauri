@@ -7,7 +7,7 @@
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -23,6 +23,9 @@ const MAX_RESTARTS: u32 = 3;
 /// How long the shell waits for the server's first URL before giving up.
 /// A live-but-silent server must not leave the splash on "Starting" forever.
 const WEB_URL_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a server must stay healthy after publishing its URL before an
+/// isolated later crash stops counting toward the storm limit.
+const RESTART_RESET_AFTER: Duration = Duration::from_secs(60);
 
 struct Session {
     child: Child
@@ -35,6 +38,9 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// and the resulting `RunEvent::Exit` calls it again. Only the first caller may
 /// tear down the server.
 static SHUTDOWN_DONE: AtomicBool = AtomicBool::new(false);
+/// Timestamp (epoch millis) of the last URL successfully published to the UI.
+/// A crash after a long healthy run is isolated, not part of a restart storm.
+static LAST_READY_MS: AtomicU64 = AtomicU64::new(0);
 
 fn session() -> &'static Mutex<Option<Session>> {
     SESSION.get_or_init(|| Mutex::new(None))
@@ -107,6 +113,39 @@ fn should_report_timeout(shutting_down: bool) -> bool {
     !shutting_down
 }
 
+/// Milliseconds since the UNIX epoch, used for the restart-stability window.
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Record a successful URL publication as the start of the stability window.
+/// An epoch clock that went backwards yields 0, which disables the reset (a
+/// crash before any readiness is still a genuine restart-storm candidate).
+fn mark_ready(last_ready_ms: &AtomicU64, now: u64) {
+    if now > 0 {
+        last_ready_ms.store(now, Ordering::SeqCst);
+    }
+}
+
+/// Pure stability-window decision. Returns the new attempt count and whether
+/// the ready marker was consumed. The marker MUST be cleared by the caller on
+/// `true`: otherwise a storm following a previously healthy run would reset on
+/// every crash against the same stale timestamp and never reach the error page.
+/// `None` (never ready / already consumed) or a backwards clock never resets.
+/// The threshold is inclusive: exactly 60s counts as stable.
+fn restart_decision(attempt: u32, last_ready_ms: Option<u64>, now: u64) -> (u32, bool) {
+    if attempt == 0 {
+        return (0, false);
+    }
+    let stable = last_ready_ms
+        .filter(|ready| now.saturating_sub(*ready) >= RESTART_RESET_AFTER.as_millis() as u64)
+        .is_some();
+    if stable { (0, true) } else { (attempt, false) }
+}
+
 /// Start the server and keep it supervised on a background thread.
 pub fn launch(app: AppHandle) {
     // The supervisor closure takes `app`; keep a clone for the spawn-failure
@@ -159,6 +198,18 @@ fn run(app: &AppHandle) -> Result<(), String> {
             Some(reason) => {
                 if SHUTTING_DOWN.load(Ordering::Relaxed) {
                     return Ok(());
+                }
+                // A server that ran healthy for a full stability window earns
+                // a fresh restart budget; only tight crash storms hit the cap.
+                // Consume the marker on reset so a storm that follows a long
+                // healthy run cannot keep resetting against the stale timestamp.
+                let ready = LAST_READY_MS.load(Ordering::SeqCst);
+                let (next, consumed) = restart_decision(
+                    attempt, (ready > 0).then_some(ready), now_millis()
+                );
+                attempt = next;
+                if consumed {
+                    LAST_READY_MS.store(0, Ordering::SeqCst);
                 }
                 eprintln!("[dsh-tauri] DSH exited unexpectedly ({reason}), restart {attempt}/{MAX_RESTARTS}");
                 if attempt >= MAX_RESTARTS {
@@ -236,6 +287,9 @@ fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> 
     eprintln!("[dsh-tauri] serving {url}");
     progress::set(Stage::Ready, "服务已启动，正在打开界面");
     crate::shell_ui::show_url(app, &url)?;
+    // The UI is up: start the stability window. A later isolated crash must
+    // not inherit restart attempts from crashes hours earlier.
+    mark_ready(&LAST_READY_MS, now_millis());
     // The UI is up: look for a newer release in the background. It never
     // touches this process, so the new version applies on the next launch.
     crate::update::spawn_once(config.runtime.clone(), config.source);
@@ -403,9 +457,9 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        claim_shutdown, classify_url_wait, missing_session_reason, recover_lock,
-        should_report_timeout, spawn_failed_message, startup_timeout_message, term_result_ok,
-        UrlEvent, UrlWait, WEB_URL_TIMEOUT,
+        claim_shutdown, classify_url_wait, mark_ready, missing_session_reason, recover_lock,
+        restart_decision, should_report_timeout, spawn_failed_message, startup_timeout_message,
+        term_result_ok, UrlEvent, UrlWait, RESTART_RESET_AFTER, WEB_URL_TIMEOUT,
     };
 
     #[test]
@@ -526,5 +580,56 @@ mod tests {
     fn should_report_timeout_is_false_while_shutting_down() {
         assert!(!should_report_timeout(true), "no error page during shutdown");
         assert!(should_report_timeout(false), "report a real startup timeout");
+    }
+
+    #[test]
+    fn restart_attempt_does_not_reset_before_the_stability_window() {
+        let ready = 1_000_000u64;
+        let window = RESTART_RESET_AFTER.as_millis() as u64;
+        assert_eq!(restart_decision(2, Some(ready), ready + window - 1), (2, false));
+        assert_eq!(restart_decision(2, Some(ready), ready), (2, false));
+    }
+
+    #[test]
+    fn restart_attempt_resets_at_the_stability_window_boundary() {
+        let ready = 1_000_000u64;
+        let window = RESTART_RESET_AFTER.as_millis() as u64;
+        assert_eq!(restart_decision(2, Some(ready), ready + window), (0, true));
+        assert_eq!(restart_decision(2, Some(ready), ready + 3 * window), (0, true));
+    }
+
+    #[test]
+    fn consecutive_crashes_still_reach_the_restart_limit() {
+        // No ready publication, or a crash inside the window: the storm guard
+        // must stay intact so three quick crashes still show the error page.
+        assert_eq!(restart_decision(3, None, 10_000), (3, false));
+        assert_eq!(restart_decision(3, Some(9_000), 10_000), (3, false));
+        // Zero attempts can never be reset into a negative budget.
+        assert_eq!(restart_decision(0, Some(0), 10_000), (0, false));
+    }
+
+    #[test]
+    fn a_storm_after_a_healthy_run_cannot_reset_against_a_consumed_marker() {
+        // The ready marker must be cleared after the first reset; otherwise
+        // crashes 2 and 3 would reset again and never reach the error page.
+        let ready = 1_000_000u64;
+        let window = RESTART_RESET_AFTER.as_millis() as u64;
+        let (attempt, consumed) = restart_decision(2, Some(ready), ready + window);
+        assert_eq!((attempt, consumed), (0, true));
+        let marker = std::sync::atomic::AtomicU64::new(if consumed { 0 } else { ready });
+        // Mirror run(): a zero / cleared marker is passed as None, never Some(0).
+        let stored = marker.load(Ordering::SeqCst);
+        let ready_arg = (stored > 0).then_some(stored);
+        assert_eq!(restart_decision(1, ready_arg, ready + window), (1, false));
+        assert_eq!(restart_decision(2, None, ready + 2 * window), (2, false));
+    }
+
+    #[test]
+    fn mark_ready_records_a_monotonic_timestamp() {
+        let clock = std::sync::atomic::AtomicU64::new(0);
+        mark_ready(&clock, 0);
+        assert_eq!(clock.load(Ordering::SeqCst), 0, "epoch 0 means never ready");
+        mark_ready(&clock, 5_000);
+        assert_eq!(clock.load(Ordering::SeqCst), 5_000);
     }
 }

@@ -8,7 +8,9 @@
 - **关于面板**：Tauri 2.12.7 本体无 dialog API（可选插件未引入、0 浸入不新增依赖），用系统 `zenity --info --no-markup` 展示 shell_info（运行时/主目录/配置/桌面版本），空值回退「未设置」。
 - **运行状态面板**：把「关于 dsh-tauri」扩成桌面端运行状态/诊断面板，体现这个可插拔 npm 运行时外壳独有的特性——运行时来源档位（Explicit/Checkout/Home/Resource）与版本（回答「跑的是哪一档、更新是否生效」）、自动更新状态（关闭 / 开启但不自动写入 / 开启且下次生效，只读判定、不触发检查）、`closeToTray` 关窗语义（托盘保活 vs 退出，保活一个 Node Host + 会话）、五个原生助手（zenity / wl-copy / wl-paste / notify-send / xdg-open）的只读 PATH 可用性、SHIM 协议版本 1 与「不实现 dshDesktop / 不设置 data-platform」的桥接事实；沿用 `zenity --info --no-markup` + `.spawn()` 非阻塞，零新依赖、零浸入 upstream，菜单仍单栏 DSH、托盘不变。
 - **重新加载修复**：改用 `WebviewWindow::reload()`（原生 WebView 重载）替代在 External URL WebView 上不可靠的 `eval("window.location.reload()")`，失败时输出带上下文的日志。
-- **Rust 单测**：重写菜单结构静态守卫（单栏工作流、关于簇、devtools 门控、reload 方式、关于面板格式与 zenity 安全参数），总数达 176 项。
+- **Rust 单测**：重写菜单结构静态守卫（单栏工作流、关于簇、devtools 门控、reload 方式、关于面板格式与 zenity 安全参数），总数达 183 项（含崩溃计数稳定窗口 5 项、建窗失败错误页守卫 2 项）。
+- **崩溃重启计数修复**：就绪后稳定 60 秒再崩溃时归零重启计数，避免相隔数小时的偶发崩溃累计触发错误页；短时连续崩溃仍保留 3 次风暴保护（纯函数覆盖门槛边界与连续崩溃）。
+- **建窗失败错误页**：`show_url` 在主线程建窗或导航失败时直接结束 boot 进度并展示可读错误页，替换卡住的 splash；不再只写日志后让 supervisor 阻塞在静默等待。
 - **docs**：核心目标统一为三档口径——Linux 深度支持、第一优先（优先支持各种发行版与不同版本，力求最佳兼容性、性能与最低资源消耗），是唯一完成适配与验证的平台；Windows / macOS 基础支持，能构建能运行，但不做深入适配与优化、未做全面验证；移动端（iOS / Android）不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用；Windows / macOS 用户建议直接从官方渠道下载官方桌面版本，本项目在 Win/Mac 上仅提供基础支持、不作为首选方案。
 
 ## 0.5.0
@@ -87,7 +89,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 176 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
+- **Rust 单测扩容**：从 17 个增至 183 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策
