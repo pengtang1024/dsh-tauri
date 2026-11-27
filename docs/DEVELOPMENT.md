@@ -89,6 +89,18 @@ npm install --prefix runtime @deepseek-ai/dsh
    避免会话库留下 WAL 残渣。
 6. **托盘退出**要先 `dsh::shutdown()` 再 `app.exit(0)`，否则会留下孤儿 node 进程。
 
+## 已知问题：Linux/Wayland 下窗口放大后的 L 形黑边（未修复）
+
+实机调查结论留痕，避免后人重复踩坑。**此问题当前未修复，属已知问题。**
+
+- **现象**：窗口放大后右侧约 72px、底部约 105px 是纯黑未绘制区，呈 L 形；原生窗口几何已经变大，但 WebView 绘制面仍停在旧尺寸，多出的区域从未被重绘。
+- **根因**：WebKitGTK 2.52.6 + Wayland + `GtkBox` 的下层限制。wry 把 WebView 用 `pack_start(expand=true, fill=true)` 塞进 `GtkBox`，`WebView::set_bounds` 对该容器是 no-op；`set_bounds` 不触发绘制缓冲高度重分配，于是绘制面高度冻结。冷启动不触发 `Resized` 事件，`content_bottom` 恒停在 650。
+- **已证伪方案 A**（Resized 分支 `sync_webview_surface` → `with_webview` → `queue_resize`，并在 Cargo.toml 加 `gtk 0.18`）：实机证明冷启动根本不进入 Resized 分支，`queue_resize` 从不执行；仅在真实 resize 时生效，且只修横向，纵向 `content_bottom` 仍停在 650；连续 5 次 resize 没有自激。该方案相关未提交代码已全部还原，不在 HEAD 中。
+- **另一个已证伪方向**：早先在 Resized 分支调 `set_size` 想自激触发重绘，结果造成 resize 自激崩溃（反馈环），已放弃。
+- **后续方向**：探索导航/加载完成后做一次有界的 `size_allocate`（只在内容就绪后触发一次，避免反馈环），或等待 WebKitGTK / wry 上游修复；在确认实机证据前不要再提交「已修复」的结论。
+
+诊断时的关键观测量：WebView 绘制面的 `content_bottom` 与原生窗口几何是否同步、`Resized` 事件是否真的到达、连续 resize 是否自激——不要只看单次截图。
+
 ## 运行时查找顺序
 
 `DSH_TAURI_RUNTIME` → 仓库内 `runtime/`（存在 `node_modules` 才算）→
