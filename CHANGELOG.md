@@ -1,6 +1,6 @@
 # 更新记录
 
-## 未发布
+## 0.7.2（2026-11-28）
 
 - **修复：关 DMABUF 后菜单透字（按需注入近不透明菜单表面）**：v0.7.1 为治 WebKit fd 泄漏在 NVIDIA 上关闭 DMABUF 渲染器后，视图走软件渲染路径、`backdrop-filter` 被整段忽略，而上游菜单表面 `--dsw-menu-surface-fill` 仍是 0.64 透明度 → 玻璃菜单退化为「半透明色块 + 清晰透字」。外壳侧按需兜底：只在 `main::dmabuf_renderer_disabled()` 为真时，向主窗口初始化脚本追加一个 `<style>`（在 `native::SHIM` 之后追加一次 `initialization_script`，SHIM 注入点与契约不变），把 `--dsw-menu-surface-fill` 提到 0.94（暗 `rgba(48,49,54,0.94)` / 亮 `rgba(252,253,254,0.94)`，暗色沿用上游 `body[data-ds-dark-theme]` 判定、加 `html` 前缀保证优先级）并把 `--dsw-menu-backdrop-filter` 置 `none`；`WEBKIT_DISABLE_DMABUF_RENDERER=0` 等开启 DMABUF 的机器不注入、玻璃保留。CSS 生成与脚本拼装为纯函数（`native::menu_surface_fallback_css` / `menu_fallback_injection`），flag=false 时返回空脚本、完全不注入；4 项单测覆盖两套主题、两条分支与 JSON 转义，上游改 token 名只会静默失效。实测（独立实例 + 私有 `XDG_RUNTIME_DIR` + 静态玻璃页回读 computed token，同 task-399 的像素法）：关 DMABUF 时 `fill=rgba(48,49,54,0.94)`、`filter=none`、注入 1 个 style，面板内 Δ(p95-p5)=14.0；同路径强制 token 保持 0.64（=修复前）Δ=87.0；关为 0 时未注入、`fill=rgba(48,49,54,0.64)`、`filter=blur(40px) saturate(150%)`、Δ=7.0。Rust 单测总数 214。
 
