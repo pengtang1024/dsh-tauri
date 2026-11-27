@@ -724,6 +724,7 @@ dependencies = [
 name = "dsh-tauri"
 version = "0.7.1"
 dependencies = [
+ "gtk",
  "libc",
  "serde",
  "serde_json",

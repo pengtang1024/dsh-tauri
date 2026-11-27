@@ -9,6 +9,8 @@ mod dsh;
 mod exec;
 mod install;
 mod native;
+#[cfg(target_os = "linux")]
+mod picker;
 mod progress;
 mod runtime;
 mod shell_ui;

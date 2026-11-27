@@ -34,24 +34,24 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 
 ## 1. 注入 globals 契约表（当前 SHIM 提供了什么）
 
-来源：`src-tauri/src/native.rs:233-273`（SHIM 原文）；对应 Rust 命令 `native.rs:95-240`；`shell_info` 返回结构见 `src-tauri/src/dsh.rs:71`；注入点 `src-tauri/src/shell_ui.rs:251` 与 `:286`（splash 与 main 两个窗口均注入）。
+来源：`src-tauri/src/native.rs:279-319`（SHIM 原文）；对应 Rust 命令 `native.rs:88-277`；`shell_info` 返回结构见 `src-tauri/src/dsh.rs:71`；注入点 `src-tauri/src/shell_ui.rs:598` 与 `:635`（splash 与 main 两个窗口均注入）。
 
-所有方法统一经 `globalThis.__TAURI__.core.invoke(command, args)`（`native.rs:236-238`）；桥不存在时 Promise reject `Tauri bridge unavailable`。
+所有方法统一经 `globalThis.__TAURI__.core.invoke(command, args)`（`native.rs:281-285`）；桥不存在时 Promise reject `Tauri bridge unavailable`。
 
 | global | 方法 | invoke command | 参数（JS → Rust） | 返回（Rust → JS） |
 | --- | --- | --- | --- | --- |
-| `__DSH_TAURI__` | `protocolVersion` | — | — | 常量 `1`（`native.rs:241`） |
+| `__DSH_TAURI__` | `protocolVersion` | — | — | 常量 `1`（`native.rs:287`） |
 | `__DSH_TAURI__` | `info()` | `shell_info` | 无 | `{ runtime, home, profile, desktopVersion }`（可能含 null 字段；`dsh.rs:71`） |
-| `__DSH_TAURI__` | `openExternal(url)` | `open_external` | `{ url: string }` | `void`；仅允许 http(s)/mailto（`native.rs:159-166`） |
-| `__DSH_TAURI__` | `notify(title, body)` | `notify` | `{ title, body }` | `void`（`native.rs:198-201`） |
-| `__DSH_TAURI__.clipboard` | `readText()` | `clipboard_read` | 无 | `string`（`wl-paste --no-newline`；`native.rs:108-111`） |
-| `__DSH_TAURI__.clipboard` | `writeText(text)` | `clipboard_write` | `{ text }` | `void`（`wl-copy`；`native.rs:130-142`） |
-| `__DSH_DIRECTORY_PICKER__` | `pick(options)` | `pick_directory` | `{ title: options?.title }` | `string \| null`，取消为 null（`native.rs:95-106`） |
-| （无 global，靠副作用） | `document.title` 同步 | `set_title` | `{ title }` | `void`；MutationObserver 观察 head，空标题忽略（`native.rs:259-268`） |
+| `__DSH_TAURI__` | `openExternal(url)` | `open_external` | `{ url: string }` | `void`；仅允许 http(s)/mailto（`native.rs:205-232`） |
+| `__DSH_TAURI__` | `notify(title, body)` | `notify` | `{ title, body }` | `void`（`native.rs:239-247`） |
+| `__DSH_TAURI__.clipboard` | `readText()` | `clipboard_read` | 无 | `string`（`wl-paste --no-newline`；`native.rs:154-156`） |
+| `__DSH_TAURI__.clipboard` | `writeText(text)` | `clipboard_write` | `{ text }` | `void`（`wl-copy`；`native.rs:176-202`） |
+| `__DSH_DIRECTORY_PICKER__` | `pick(options)` | `pick_directory` | `{ title: options?.title }` | `string \| null`，取消为 null（`native.rs:148-152`；对话框实现在 `picker.rs`，见 §1.3） |
+| （无 global，靠副作用） | `document.title` 同步 | `set_title` | `{ title }` | `void`；MutationObserver 观察 head，空标题忽略（`native.rs:258-270`） |
 
 ### 1.1 应用命令的 ACL 前置条件（Tauri 2.12 起必须，2026-11-28 修复）
 
-上表每个 `invoke command` 都是应用自定义命令（`main.rs:101-110` 的 `generate_handler!`），它们**必须被 capabilities 放行**，否则运行期被拒为 `Command <name> not allowed by ACL`（release 构建的固定文案；debug 构建给出 `pick_directory not allowed. Plugin not found` 这类明细）：
+上表每个 `invoke command` 都是应用自定义命令（`main.rs:113-122` 的 `generate_handler!`），它们**必须被 capabilities 放行**，否则运行期被拒为 `Command <name> not allowed by ACL`（release 构建的固定文案；debug 构建给出 `pick_directory not allowed. Plugin not found` 这类明细）：
 
 - 主窗口用 `WebviewUrl::External` 加载回环服务（`http://127.0.0.1:<port>`，`shell_ui.rs:632`）。tauri 2.12.7 的 `is_local_url`（`webview/mod.rs:1961-2002`）只把 tauri 协议 / devUrl / frontendDist / 自注册协议视作本地，回环 HTTP 属于 **remote origin**；`on_message`（`webview/mod.rs:2080`）因此对本项目的应用命令一律做 ACL 检查（2.10.2 的条件里没有 `|| !is_local`，这是 2.12 收紧后的行为）。
 - 应用命令的权限来自应用清单：`src-tauri/permissions/dsh-shims.toml` 为每个命令声明一条 `allow-<command>`（`src-tauri/permissions` 是 tauri-build 的默认权限目录，`attributes.app_manifest` 为空表时也会解析），`capabilities/default.json` 再把它们列进 `permissions`，并用 `remote.urls` 覆盖回环来源；`splash` 走 `tauri://localhost` 本地来源，靠 `local`（默认 true）放行 `runtime_status`。
@@ -63,6 +63,17 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 ### 1.2 渲染路径限制：关 DMABUF 时菜单表面的兜底（无契约变更）
 
 上游菜单表面由 `._material_*` 消费 `--dsw-menu-surface-fill`（暗 `rgba(48,49,54,0.64)` / 亮 `rgba(252,253,254,0.7)`）与 `--dsw-menu-backdrop-filter`（`blur(40px) saturate(150%)`）。在 WebKitGTK 的软件渲染路径（`WEBKIT_DISABLE_DMABUF_RENDERER=1`，本外壳在 NVIDIA 上默认设置以治 fd 泄漏）`backdrop-filter` 被整段忽略，菜单于是变成半透明色块并透出页面文字——这是上游限制，不是桥接契约的一部分。外壳只在确实关闭 DMABUF 时，向主窗口初始化脚本追加一个 `<style>`（在 `native::SHIM` 之后追加一次 `initialization_script`，不改变协议版本、不注入 `dshDesktop`、不设置 `data-platform`），把上述两个 token 覆盖为 0.94 / `none`；开启 DMABUF 时不注入。因此第 1 节的契约表与第 2 节的探测结论都不变，`test/shim-contract.test.mjs` 的断言也不受影响。
+
+### 1.3 目录选择对话框：自绘 GTK3 原生对话框 + zenity 兜底（契约不变）
+
+`pick_directory` 的**契约没变**（`__DSH_DIRECTORY_PICKER__.pick({ title })` → `string | null`，取消为 `null`），换的是对话框实现： zenity 4.2.1 的 `--help-file-selection` 只有 `--filename/--multiple/--directory/--save/--separator/--file-filter`，既没有 `--show-hidden` 也没有路径输入，用户要的「默认看见 .点目录」「粘贴路径跳转」无法表达，于是由外壳自己构造 GTK3 对话框（`src-tauri/src/picker.rs`）：
+
+- `GtkFileChooserWidget`（`SELECT_FOLDER`）+ `show_hidden(true)`：`.cache`、`.config`、`.hidden-test-dir` 等默认可见（`picker.rs:175`）。
+- 顶部常驻「路径」输入框（`GtkEntry`，打开即聚焦）：接受 `/abs`、`~/xxx`（按 HOME 展开）与相对路径（按 `current_dir` 补全），`//`、`/./`、`..` 只做词法规整且不越过根（`picker.rs:59-113` 的 `lexical_absolute` / `expand_input` / `resolve_dir`）；回车或「转到」跳转并在下方回显「当前目录」。
+- 「确定」时输入框优先：能解析成已存在目录就直接返回该路径（不存在或不是目录则**不关闭**对话框并给出提示，`picker.rs:206-222` 的 response 拦截）；输入框为空才回退 chooser 的选中项 / 当前目录。「取消」返回 `None`、不写错误。
+- 线程模型（不会死锁）：Tauri 主线程即 GTK 主线程，`pick_directory` 因此是 `async fn`（sync 命令在主线程执行，等一个必须跑在同一线程的对话框必成死锁）；它用 `AppHandle::run_on_main_thread` 把对话框排进 GTK 线程，再用 `std::sync::mpsc` + `tauri::async_runtime::spawn_blocking` 等结果（`picker.rs:252-265`）。等待落在阻塞线程池，既不占 GTK 线程也不占异步 worker；`GtkDialog::run` 的嵌套 GLib 主循环会继续派发排队的主线程任务；对话框闭包只在 `run()` 返回后发送结果，从不反向等待命令侧——因此两条路径都不可能互相等待。
+- 依赖与降级：只加 `gtk = "0.18"`（linux target，`v3_24`）；Cargo.lock 里本就只有 gtk 0.18.2 一份（tauri/wry 已编译），直接依赖不增加编译成本。`DSH_TAURI_PICKER=zenity` 或 `run_on_main_thread` / 对话框返回 `Err` 时记日志并回退原 zenity 路径（同样 `spawn_blocking` 执行），SHIM 侧行为与旧版一致。
+- 守卫与验证：`tools/check-commands.mjs` 的 `#[tauri::command]` 解析已支持 `pub async fn`（否则 async 命令会被静默漏检）；`picker.rs` 内 16 项纯函数单测覆盖 `~` 展开、相对转绝对、`//`/`..` 规整、根不可越界、空/控制字符拒绝、存在性/非目录、选择优先级与 env 开关。实机验收（独立实例 + 私有 `XDG_RUNTIME_DIR` + 临时 HOME，假页面经 `DSH_TAURI_URL`）：隐藏目录在列表可见 → `wl-copy` + Ctrl+V 粘贴 `~/visible-dir` 回车跳转（面包屑与「当前目录」同步、`~` 展开正确）→ 粘贴 `.hidden-test-dir` 回车后点「确定」，页面拿到 `"/tmp/…/home/.hidden-test-dir"` → 再开一次点「取消」，页面拿到 `null` 且日志无错误 → `DSH_TAURI_PICKER=zenity` 实例日志出现「指定 zenity：跳过 GTK 目录对话框」并弹出 `zenity --file-selection --directory` 对话框。
 
 ## 2. 上游 Web UI 实际探测／调用的桌面全局——逐项对照
 

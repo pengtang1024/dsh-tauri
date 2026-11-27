@@ -90,18 +90,64 @@ fn picked_path(stdout: &str) -> Option<String> {
     (!path.is_empty()).then(|| path.to_owned())
 }
 
-/// Folder chooser for the workspace picker (`__DSH_DIRECTORY_PICKER__`).
-#[tauri::command]
-pub fn pick_directory(title: Option<String>) -> Result<Option<String>, String> {
-    let mut args = vec!["--file-selection", "--directory", "--title"];
-    let title = title.unwrap_or_else(|| "选择目录".to_owned());
-    args.push(title.as_str());
+/// Run the zenity folder chooser and normalize its answer.
+///
+/// zenity 4.2.1 has no `--show-hidden` and no path entry (see `picker.rs`), so
+/// this is the documented fallback rather than the primary dialog.
+fn zenity_dialog(title: &str) -> Result<Option<String>, String> {
+    let args = vec!["--file-selection", "--directory", "--title", title];
     // zenity exits 1 when the user cancels; compare the code, never error text.
     match run_helper("zenity", &args, Some(1)) {
         HelperOutcome::Ok(stdout) => Ok(picked_path(&stdout)),
         HelperOutcome::Cancelled => Ok(None),
         HelperOutcome::Failed(error) => Err(error),
     }
+}
+
+/// Run the zenity fallback off the async runtime's worker: `output()` blocks
+/// until the user closes the dialog, which must never park a runtime thread.
+async fn zenity_pick(title: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || zenity_dialog(&title))
+        .await
+        .map_err(|error| format!("zenity 目录任务失败：{error}"))?
+}
+
+/// Serve one pick from the GTK dialog, falling back to zenity.
+#[cfg(target_os = "linux")]
+async fn pick_with_native(app: &AppHandle, title: String) -> Result<Option<String>, String> {
+    match crate::picker::source_from_env(std::env::var(crate::picker::PICKER_ENV).ok().as_deref()) {
+        crate::picker::Source::Zenity => {
+            eprintln!(
+                "[dsh-tauri] {} 指定 zenity：跳过 GTK 目录对话框",
+                crate::picker::PICKER_ENV
+            );
+            zenity_pick(title).await
+        }
+        crate::picker::Source::Gtk => match crate::picker::choose(app, title.clone()).await {
+            Ok(selection) => Ok(selection),
+            Err(error) => {
+                eprintln!("[dsh-tauri] GTK 目录对话框不可用，回退 zenity：{error}");
+                zenity_pick(title).await
+            }
+        },
+    }
+}
+
+/// Off Linux there is no GTK dialog to drive: zenity is the only implementation.
+#[cfg(not(target_os = "linux"))]
+async fn pick_with_native(_app: &AppHandle, title: String) -> Result<Option<String>, String> {
+    zenity_pick(title).await
+}
+
+/// Folder chooser for the workspace picker (`__DSH_DIRECTORY_PICKER__`).
+///
+/// Async on purpose: sync Tauri commands run on the main thread, which is also
+/// the GTK thread, so waiting there for a dialog that must run on the very same
+/// thread would deadlock. See `picker.rs` for the full thread model.
+#[tauri::command]
+pub async fn pick_directory(app: AppHandle, title: Option<String>) -> Result<Option<String>, String> {
+    let title = title.unwrap_or_else(|| "选择目录".to_owned());
+    pick_with_native(&app, title).await
 }
 
 #[tauri::command]

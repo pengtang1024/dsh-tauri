@@ -13,7 +13,7 @@
 
 **目标层**：本项目以 Linux 为第一优先、深度支持——优先支持各种发行版与不同版本，在兼容性、运行性能与资源消耗上尽量做到最好，Linux 是唯一完成适配与验证的平台；Windows / macOS 提供桌面端基础支持——能构建、能运行即可，不做深入适配与优化，建议直接从官方渠道下载 DeepSeek Harness 官方桌面版本，本项目的 Tauri 壳不作为 Win/Mac 用户的首选方案；移动端（iOS / Android）不支持——架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
-> **现状层（如实说明）**：Linux 是唯一完成适配与验证的平台（当前代码依赖 Linux 原生命令 `zenity` / `wl-clipboard` / `notify-send`，且只在 Linux + WebKitGTK 2.52 上验证过；多发行版兼容仍是目标，不代表已全面验证）。Windows / macOS 提供基础支持、能构建能运行，但不做深入适配与优化，未做全面验证；移动端（iOS / Android）明确不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
+> **现状层（如实说明）**：Linux 是唯一完成适配与验证的平台（当前代码依赖 GTK3 原生对话框与 Linux 原生命令 `zenity` / `wl-clipboard` / `notify-send`，且只在 Linux + WebKitGTK 2.52 上验证过；多发行版兼容仍是目标，不代表已全面验证）。Windows / macOS 提供基础支持、能构建能运行，但不做深入适配与优化，未做全面验证；移动端（iOS / Android）明确不支持，原因是架构上依赖本地 Node 服务 + 系统 WebView，移动端沙箱与后台限制不适用。
 
 ![dsh-tauri 运行中的窗口](docs/images/shell.png)
 
@@ -53,7 +53,7 @@ Tauri 只提供系统 WebView 和 Rust 后端，不带 Node 运行时。所以�
 
 - Node 24+（在 PATH 里，或 `DSH_TAURI_NODE` 指定）
 - Rust 1.9x、`webkit2gtk-4.1`、`libsoup-3.0`、`librsvg2`、`libayatana-appindicator3`、`patchelf`
-- 运行时助手：`zenity`（目录选择 / 关于面板）、`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）
+- 运行时助手：`zenity`（关于面板；目录选择已改用外壳自绘的 GTK3 原生对话框，zenity 只作降级兜底）、`wl-clipboard`（剪贴板）、`libnotify-bin`（`notify-send` 通知）、`xdg-utils`（`xdg-open` 外链）
 - Debian / Ubuntu 的 `.deb` 包已在 `bundle.linux.deb.depends` 中声明这 4 个助手，安装时一并拉取，开箱即用；AppImage 与源码运行需自行安装：
 
 ```bash
@@ -148,6 +148,7 @@ docs/DEVELOPMENT.md         开发与验证手册
 | --- | --- |
 | 会话 / 工作区 / 插件 | 官方 Web UI，加载自 `dsh web` |
 | 目录选择、剪贴板、通知、外链 | 注入脚本 + Tauri 命令 |
+| 目录选择对话框 | `picker.rs`：GTK3 原生对话框（隐藏文件默认可见、常驻路径输入框），经主线程运行；失败或 `DSH_TAURI_PICKER=zenity` 时回退 `zenity` |
 | 窗口标题、尺寸、托盘、单实例 | `shell_ui.rs` / `single_instance.rs` |
 | 崩溃自动重启 | `supervisor.rs`，最多 3 次后错误页 |
 | 运行时安装/更新 | 自动（首次启动安装，启动后自动检查更新） |

@@ -35,7 +35,9 @@ function* sourceFiles(dir) {
 // An attribute may be followed by other attributes and blank lines before
 // the function; only the next `pub fn` counts as the command definition.
 const commandAttr = /^\s*#\[tauri::command\]\s*$/;
-const pubFn = /^\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
+// Commands may be `async` (native dialogs, idle waits): they are still commands
+// and must be registered like any other.
+const pubFn = /^\s*pub\s+(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
 const defined = [];
 for (const file of sourceFiles(srcDir)) {
   const text = readFileSync(file, 'utf8');
