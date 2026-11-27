@@ -26,7 +26,7 @@
   - Fedora/AppImage：10 个动态库 SONAME（见矩阵），缺任一即 exit 127 · error while loading shared libraries。注意 AppImage 并不自带这些基础图形/wayland 运行库。
 - 可选增强（缺了功能降级，不影响装包）：
   - kdialog：KDE 系对话框兜底；Ubuntu 24.04 默认缺（GNOME 不需要），Fedora/Arch 可独立安装（不是 kde-components 元包）。当前代码已实现 kdialog 兜底链（portability/task-405），本机无 kdialog 真机，KDE 取消键退出码 1 依公开文档标注。
-  - zenity：目录选择主路径已改为自绘 GTK，zenity 仅兜底；关于面板当前仍用 zenity，此为已知缺口（由 task-405 去 zenity 化跟进）。
+  - zenity：目录选择与关于面板均已改为自绘 GTK（`picker::show_info`）为主路径，zenity/kdialog 仅作兜底降级；缺失不影响主功能。
   - wl-copy / wl-paste：Wayland 剪贴板；无 Wayland 会话时相关功能降级。
   - notify-send：通知；缺则无桌面通知。
   - xdg-open：外部链接打开；缺则相关调用失败。
@@ -106,5 +106,5 @@
 1. Debian/Ubuntu .deb 路线是唯一完整验证通过的产物路径：装包、依赖闭合、外部助手命令均达标；gtk 启动失败纯粹因 VM 禁止显示后端，不代表 GUI 不可用。建议把「headless 装包/依赖冒烟」固化为 CI 门禁。
 2. Fedora（dnf）无官方 rpm 产物：只能 AppImage 或源码构建。AppImage 在最小 Fedora 上并非开箱即用，至少需补 8 类基础运行库。建议：要么 CI 增加 rpm 产物，要么在 Release 说明中给出上述 dnf install 前置命令；同时把 libayatana-appindicator3 列为已知不可满足依赖（托盘在 Fedora 降级）。
 3. Arch（pacman）包名总体齐全，但滚动发行版的 WebKit 版本（2.54.3）与 AppImage 自带版本差异需真机复验；本次 VM 未起来，明确标为未验证。若要补测，建议换带 cloud-init 的 Arch 镜像或制作带预置 root 密码的自定义镜像。
-4. 外部命令依赖的发行版差异是真实风险：Ubuntu 上助手命令由 deb 强依赖保障；Fedora/Arch 上助手命令与 AppImage 运行库都要用户手动装。当前代码已有 kdialog 兜底链（task-405），但关于面板仍依赖 zenity 属已知缺口，建议按 task-405 的去 zenity 化方案收口。
+4. 外部命令依赖的发行版差异是真实风险：Ubuntu 上助手命令由 deb 强依赖保障；Fedora/Arch 上助手命令与 AppImage 运行库都要用户手动装。当前代码已实现 kdialog 兜底链，且目录选择与关于面板均已改为自绘 GTK（`picker::show_info`）为主路径，zenity/kdialog 仅作兜底降级（task-405 已收口），不再有关于面板依赖 zenity 的缺口。
 5. 资源释放已完成：三台 VM 全部 destroy + undefine --remove-all-storage，磁盘占用回到 48G 基线，无残留域与 qemu 进程。临时工作区 .tmp-compat/（含镜像、seed ISO、SSH key、console 日志）用完即从工作区删除，并还原 .git/info/exclude。
