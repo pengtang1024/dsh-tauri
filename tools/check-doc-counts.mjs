@@ -7,11 +7,15 @@
  * It also checks the bridge contract guard's check count (the GUARD_CHECK_COUNT
  * constant in tools/check-bridge-contract.mjs) against the counts documented in
  * CHANGELOG.md, README.md and docs/DESKTOP_BRIDGE.zh.md, without running the
- * guard (which scans thousands of files).
+ * guard (which scans thousands of files). It also guards the remembered window
+ * geometry contract: the two literals in shell_ui.rs::state_path() must stay
+ * ".dsh" and "dsh-tauri-window-state.json", and the documented path must agree
+ * in README.md and all seven docs/DETAIL.<lang>.md files, without touching the
+ * filesystem, HOME or any environment variable.
  *
  * Only node:fs / node:path / node:url are used; nothing is written.
  * Prints one PASS/FAIL per check with file:line and expected/actual, then
- * "SUMMARY: 9 checks, M FAILS". Exits 1 when any check fails, else 0.
+ * "SUMMARY: 19 checks, M FAILS". Exits 1 when any check fails, else 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -68,6 +72,52 @@ const checks = [
   { name: 'DESKTOP_BRIDGE.zh.md 契约守卫检查项数（' + guardPath + ':' + guardLine + '）', file: 'docs/DESKTOP_BRIDGE.zh.md', pattern: /契约守卫 (\d+) checks 0 FAIL/, expected: guardCount },
 ];
 
+// --- window state path contract: read source text only; no fs/env probing ---
+const shellUiPath = 'src-tauri/src/shell_ui.rs';
+const shellUiText = readFileSync(join(root, shellUiPath), 'utf8');
+const statePathPattern = /fn\s+state_path\s*\(\s*\)\s*->\s*PathBuf\s*\{[\s\S]*?\}/;
+const statePathMatch = shellUiText.match(statePathPattern);
+const statePathBody = statePathMatch ? statePathMatch[0] : '';
+const statePathLine = statePathMatch
+  ? shellUiText.slice(0, shellUiText.indexOf(statePathMatch[0])).split(/\r?\n/).length
+  : '?';
+const expectedDirLiteral = '".dsh"';
+const expectedFileLiteral = '"dsh-tauri-window-state.json"';
+const documentedPath = '~/.dsh/dsh-tauri-window-state.json';
+
+checks.push({
+  name: 'shell_ui.rs::state_path() 目录字面量（' + shellUiPath + ':' + statePathLine + '）',
+  file: shellUiPath,
+  pattern: /fn\s+state_path\s*\(\s*\)\s*->\s*PathBuf\s*\{[\s\S]*?\.join\("([^"]*)"\)[\s\S]*?\}/,
+  custom: () => (statePathBody.match(/\.join\("([^"]*)"\)/g) || []).some((s) => s === '.join(' + expectedDirLiteral + ')'),
+  expected: expectedDirLiteral,
+  actual: (statePathBody.match(/\.join\("([^"]*)"\)/g) || []).join('、') || 'PATTERN NOT FOUND',
+  where: shellUiPath + ':' + statePathLine,
+});
+checks.push({
+  name: 'shell_ui.rs::state_path() 文件名字面量（' + shellUiPath + ':' + statePathLine + '）',
+  file: shellUiPath,
+  pattern: /fn\s+state_path\s*\(\s*\)\s*->\s*PathBuf\s*\{[\s\S]*?\}/,
+  custom: () => statePathBody.includes(expectedFileLiteral),
+  expected: expectedFileLiteral,
+  actual: (statePathBody.match(/\.join\("([^"]*)"\)/g) || []).join('、') || 'PATTERN NOT FOUND',
+  where: shellUiPath + ':' + statePathLine,
+});
+for (const file of ['README.md', 'docs/DETAIL.zh.md', 'docs/DETAIL.en.md', 'docs/DETAIL.es.md',
+  'docs/DETAIL.fr.md', 'docs/DETAIL.de.md', 'docs/DETAIL.ru.md', 'docs/DETAIL.pt.md']) {
+  const docText = readFileSync(join(root, file), 'utf8');
+  const docLine = docText.split(/\r?\n/).findIndex((line) => line.includes(documentedPath)) + 1;
+  checks.push({
+    name: file + ' 窗口状态路径文档',
+    file,
+    pattern: /~\/\.dsh\/dsh-tauri-window-state\.json/,
+    expected: documentedPath,
+    custom: () => docLine > 0,
+    actual: docLine > 0 ? documentedPath : 'PATTERN NOT FOUND',
+    where: file + ':' + (docLine || '?'),
+  });
+}
+
 const FAILS = [];
 for (const check of checks) {
   const path = join(root, check.file);
@@ -83,11 +133,14 @@ for (const check of checks) {
     }
   }
 
-  const where = found ? check.file + ':' + found.line : check.file + ':?';
-  if (found && Number(found.value) === check.expected) {
-    console.log('PASS ' + check.name + ' — ' + where + ' — 期望 ' + check.expected + ' / 实际 ' + found.value);
+  const where = check.custom ? check.where : (found ? check.file + ':' + found.line : check.file + ':?');
+  const ok = check.custom
+    ? check.custom()
+    : (found !== null && Number(found.value) === check.expected);
+  const actual = check.custom ? check.actual : (found ? found.value : 'PATTERN NOT FOUND');
+  if (ok) {
+    console.log('PASS ' + check.name + ' — ' + where + ' — 期望 ' + check.expected + ' / 实际 ' + actual);
   } else {
-    const actual = found ? found.value : 'PATTERN NOT FOUND';
     console.log('FAIL ' + check.name + ' — ' + where + ' — 期望 ' + check.expected + ' / 实际 ' + actual);
     FAILS.push(check.name);
   }
@@ -95,6 +148,6 @@ for (const check of checks) {
 
 console.log('SUMMARY: ' + checks.length + ' checks, ' + FAILS.length + ' FAILS');
 if (FAILS.length > 0) {
-  console.error('文档测试数量与源码不一致（' + FAILS.join('、') + '）：请同步文档中的测试数量或修正统计（src-tauri/src/**/*.rs 实际 #[test] = ' + rustTestCount + '；test/**/*.test.mjs 实际 test() = ' + npmTestCount + '）。');
+  console.error('文档声明与源码/窗口状态路径契约不一致（' + FAILS.join('、') + '）：请同步文档或源码（src-tauri/src/**/*.rs 实际 #[test] = ' + rustTestCount + '；test/**/*.test.mjs 实际 test() = ' + npmTestCount + '）。');
   process.exit(1);
 }

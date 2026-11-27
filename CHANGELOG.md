@@ -1,5 +1,9 @@
 # 更新记录
 
+## [未发布]
+
+- **窗口几何记忆路径文档与守卫**：README 与七语言详情页写明窗口状态文件 `~/.dsh/dsh-tauri-window-state.json` 的位置与作用（记录尺寸、位置与最大化状态，下次启动据此恢复，不写死 uid、不随 `DSH_HOME` 改变）；文档守卫只读校验 `shell_ui.rs::state_path()` 中 `".dsh"` 与 `"dsh-tauri-window-state.json"` 两个字面量未变，并核对八处文档路径一致，防止几何记忆静默失效。
+
 ## 0.6.0
 
 - **deb 运行时助手依赖**：把 README 声明的四个运行时助手（`zenity` / `wl-clipboard` / `libnotify-bin` / `xdg-utils`）补进 `tauri.conf.json` 的 `bundle.linux.deb.depends`，Debian / Ubuntu 的 `.deb` 安装后目录选择、剪贴板、通知与外链开箱即用（Tauri 的 depends 是覆盖语义，需显式声明）；README 与七语言详情页的依赖段同步该口径并在 apt 示例补上 `xdg-utils`。

@@ -188,6 +188,7 @@ Constraints: do not kill the running service (the new version loads only on the 
 | `DSH_TAURI_NPM` | path to the npm executable (npm on PATH by default; used by automatic install/update and version detection) |
 | `DSH_TAURI_PROFILE` | which profile to launch (default `web`) |
 | `DSH_HOME` | data directory (default `~/.dsh`) |
+| Window state file | `~/.dsh/dsh-tauri-window-state.json`: stores window geometry (size, position, maximized state) for restore on next launch; independent of `DSH_HOME` |
 | `DSH_TAURI_URL` | for development: open an already-running loopback service directly (http(s) + 127.0.0.1/localhost/[::1] only), without spawning one |
 
 ### Automatic update switches (environment variables)

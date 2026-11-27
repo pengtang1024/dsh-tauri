@@ -188,6 +188,7 @@ Restricciones: no matar el servicio en ejecución (la versión nueva se carga so
 | `DSH_TAURI_NPM` | ruta al ejecutable de npm (por defecto el npm del PATH; lo usan la instalación/actualización automática y la detección de versión) |
 | `DSH_TAURI_PROFILE` | qué perfil arrancar (por defecto `web`) |
 | `DSH_HOME` | directorio de datos (por defecto `~/.dsh`) |
+| Archivo de estado de la ventana | `~/.dsh/dsh-tauri-window-state.json`: guarda la geometría de la ventana (tamaño, posición y estado maximizado) para restaurarla en el próximo inicio; no depende de `DSH_HOME` |
 | `DSH_TAURI_URL` | para desarrollo: abrir directamente un servicio loopback ya en ejecución (solo http(s) + 127.0.0.1/localhost/[::1]), sin lanzar uno |
 
 ### Interruptores de actualización automática (variables de entorno)
