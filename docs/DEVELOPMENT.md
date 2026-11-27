@@ -89,18 +89,20 @@ npm install --prefix runtime @deepseek-ai/dsh
    避免会话库留下 WAL 残渣。
 6. **托盘退出**要先 `dsh::shutdown()` 再 `app.exit(0)`，否则会留下孤儿 node 进程。
 
-## 已知问题：Linux/Wayland 下窗口放大后的 L 形黑边（未修复）
+## 历史问题：Linux/Wayland 下窗口放大后的 L 形黑边（已定位为 WebKit fd 泄漏并修复）
 
-实机调查结论留痕，避免后人重复踩坑。**此问题当前未修复，属已知问题。**
+此节保留完整调查史。**问题已于 0.7.x 修复**：真因是 WebKitGTK 的 NVIDIA DMABUF 渲染路径泄漏 `sync_file` fd，耗尽 `RLIMIT_NOFILE` 后新的绘制缓冲分配失败、绘制面停在旧尺寸；不是 GTK 尺寸分配没走通。修复见 `src-tauri/src/main.rs` 的 `raise_nofile_limit()` 与 `apply_webkit_workarounds()`。
 
-- **现象**：窗口放大后右侧约 72px、底部约 105px 是纯黑未绘制区，呈 L 形；原生窗口几何已经变大，但 WebView 绘制面仍停在旧尺寸，多出的区域从未被重绘。
-- **根因**：WebKitGTK 2.52.6 + Wayland + `GtkBox` 的下层限制。wry 把 WebView 用 `pack_start(expand=true, fill=true)` 塞进 `GtkBox`，`WebView::set_bounds` 对该容器是 no-op；`set_bounds` 不触发绘制缓冲高度重分配，于是绘制面高度冻结。冷启动不触发 `Resized` 事件，`content_bottom` 恒停在 650。
+- **现象**：窗口放大后右侧约 72px、底部约 105px 是纯黑未绘制区，呈 L 形；原生窗口几何已经变大，但 WebView 绘制面仍停在旧尺寸，多出的区域从未被重绘。照片证据之外还有更完整的一面：页面按**旧宽度**布局（原生 788 宽时侧栏仍是展开态、分隔线 x≈279，内容被右缘切断），这正是「绘制面与新宽度脱节」而不是「只是没画新区域」。
+- **真根因（2026-11-27 实测）**：WebKitWebProcess 每个重绘帧泄漏一个 `anon_inode:sync_file`（NVIDIA GL 合成的 fence），泄漏只在 NVIDIA DMABUF 渲染路径上出现。WebKit 子进程继承外壳进程的 `RLIMIT_NOFILE`，软上限 1024 被打满后日志出现 `Failed to create handle for shared memory buffer` / `Failed to allocate shared memory buffer`，新缓冲分配失败 → 绘制面与页面视口停在旧尺寸。用户实机证据：web 进程 fd 1022/1024、其中 949 个 `sync_file`；裁剪式复现：旧构建 30 次 resize 后 fd 111→485（`sync_file` 414 个），关闭 DMABUF 后同样 30 次 resize 保持 33 个 fd、0 个 `sync_file`。泄漏并非只在 resize 时发生，持续重绘（动画、流式输出）同样累积。
+- **修复（两层，都在 GTK/WebKit 初始化前生效）**：① 启动时把 `RLIMIT_NOFILE` 软上限提到 `NOFILE_TARGET=65536`（受硬上限约束，绝不降低已有的更高软上限，失败只记日志）；② 检测到 NVIDIA 驱动（`/sys/module/nvidia` 或 `/proc/driver/nvidia/version`）时设 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 从源头停止泄漏（用户已显式设置该变量时一律尊重）。实机验收：修复版 web 进程软上限 65536，fd 推到 1719（远超旧上限 1024）后执行「最小化期间 MoveResize 到 788x836 → 恢复」仍是紧凑布局（分隔线 x≈55，旧版 279）、底部纯黑 0 行；可见状态 1340x646→788x836 单步与连续 5 次均 0 黑行。
+- **已证伪：「不可见期间改尺寸不重放给 WebView」**。健康实例（fd 未接近上限）上按「1340x646 → minimize → MoveResize 788x836 → unminimize+activate」实测恢复后布局正确（分隔线 x≈52–55、0 黑行）；同一序列在旧构建把 fd 推到软上限后才出现侧栏常驻展开（分隔线 x=279）。所以「恢复时未重放尺寸」不是根因，仅在 fd 耗尽时表现为同款症状，外壳侧未据此改代码。
 - **已证伪方案 A**（Resized 分支 `sync_webview_surface` → `with_webview` → `queue_resize`，并在 Cargo.toml 加 `gtk 0.18`）：实机证明冷启动根本不进入 Resized 分支，`queue_resize` 从不执行；仅在真实 resize 时生效，且只修横向，纵向 `content_bottom` 仍停在 650；连续 5 次 resize 没有自激。该方案相关未提交代码已全部还原，不在 HEAD 中。
 - **另一个已证伪方向**：早先在 Resized 分支调 `set_size` 想自激触发重绘，结果造成 resize 自激崩溃（反馈环），已放弃。
 - **已证伪方案 B**（导航/加载完成后做一次有界 `size_allocate`，task-384 只读论证）：虽能从 `with_webview` 拿到 GTK 父容器 allocation（`tauri-2.12.7/src/webview/webview_window.rs:1994` 的 `default_vbox`；GTK `WidgetExt` 的 `parent/allocation/size_allocate` 齐备），用 GTK allocation 作尺寸源也不会重演 `set_size` 的物理/逻辑自激，但两个必要条件都不满足——WebView 以 `pack_start(expand=true, fill=true)` 铺满 `GtkBox`（wry `mod.rs:698-702`），窗口放大后父容器 allocation 已是新尺寸，同尺寸 `size_allocate` 极可能是 no-op，而更强的 `queue_resize` 已实机证明纵向无效（`content_bottom` 恒停 650）；冷启动最大化恢复是 `build()` 之后才 async maximize（`shell_ui.rs:471-474`），导航完成点父容器尺寸未定，一次性调用覆盖不到最终 configure。上游 wry#1727 仍 open 无 workaround，tauri PR#16507 针对 child webview 不适用。**别再尝试此方向**。
-- **后续方向**：外壳侧无可靠修法，等待 WebKitGTK / wry 上游修复 `GtkBox` + Wayland 下绘制缓冲的尺寸重分配；在确认实机证据前不要再提交「已修复」的结论。
+- **上游状态**：WebKitGTK 的 DMABUF fence 泄漏仍需上游修复；外壳侧的两层措施是「抬高上限 + 在 NVIDIA 上停用泄漏路径」，不是根治 WebKit。若将来 WebKit 修好，可在证实的版本上移除第 ②层。
 
-诊断时的关键观测量：WebView 绘制面的 `content_bottom` 与原生窗口几何是否同步、`Resized` 事件是否真的到达、连续 resize 是否自激——不要只看单次截图。
+诊断时的关键观测量：WebView 绘制面的 `content_bottom` 与原生窗口几何是否同步、`Resized` 事件是否真的到达、连续 resize 是否自激、以及 **WebKitWebProcess 的 fd 数与 `sync_file` 数量**（`ls /proc/<webpid>/fd | wc -l`、`ls -l /proc/<webpid>/fd | grep -c sync_file`）——不要只看单次截图。
 
 ## 运行时查找顺序
 
