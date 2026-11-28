@@ -1,8 +1,13 @@
 # 更新记录
 
-## 0.11.0（2026-11-28）
+## 0.12.0（2026-11-28）
 
 - **新增：Desktop profile 启动能力（对标官方 Electron 桌面端，严格 0 浸入）**：CLI 的 --profile desktop 被 bin.js 无条件拒绝（manageDesktopProfile 只放开 plugin 子命令），外壳改为直接调用上游私有入口 runProfile：新增 boot_script.rs 生成 .mjs 到 <DSH_HOME>/dsh-tauri/boot/（绝不写 runtime 树），从 @deepseek-ai/dsh/profile-boot / @deepseek-ai/dsh-app-boot / @deepseek-ai/dsh-launch-environment 三个子路径导入，配置经 DSH_TAURI_BOOT_CONFIG JSON 环境变量传入（无拼接注入），loadProfileDirectory(..., {userLayer:true}) + resolvedProfile={profile,installAnchor:INSTALL_ANCHOR} + patchFiles 只放外壳最小 runtime patch（home/profile 两份 cordis.patch.yml 由内核自动加载，重复传会二次 apply insert）。runtime patch 仅三行：webserver host=127.0.0.1 port=0、connection trustedHosts=[]（不写官方那 5 个 LAN IP）、desktop-product-telemetry serviceName/serviceVersion（用 desktopVersion 修 telemetry pending）。Rust 注入 DSH_CLIENT_VERSION=<desktopVersion> 到子进程 env。dsh.rs 新增 resolve_profile()（DSH_TAURI_PROFILE 环境变量 > ~/.dsh/dsh-tauri-profile.json 持久配置 > 默认 web），Config::resolve 与 info() 共用；desktop profile 无 package.json 时明确报错引导先启动官方端一次。supervisor.rs::spawn_server 按 profile 分支：desktop 走 node <boot_script.mjs>，web 原 CLI 路径完全不动；pre_exec PR_SET_PDEATHSIG、stdout/stderr pipe、banner URL 解析保持不变；runProfile 失败不降级回 CLI web，走 progress::fail + show_error 明确提示「Desktop profile 启动失败，请切回 Web 或检查官方端」。菜单单栏 DSH 新增 Profile 子菜单含两个 CheckMenuItem「Web（默认）」/「Desktop（对标官方）」（id profile-web/profile-desktop），切换写持久配置后复用既有 restart 顺序（SaveWindowState→Shutdown→ReleaseSocket→SpawnReplacement→Exit，不用 app.relaunch），关于面板显示持久配置来源与「Desktop 与官方端同时运行会争抢 profile」风险提示。新增 11 项 Rust 单测（boot 脚本导入/env JSON/无 LAN IP/原子写、profile 优先级与校验、profile 菜单结构、failure 文案、来源标签），Rust 单测总数 232；check:docs 19/0。实机 VM 完整验证留下一轮。
+
+---
+
+## 0.11.0（2026-11-28）
+
 - **新增：菜单「DSH → 重启以应用更新」**：后台更新只 notify「重启生效」但此前没有一键重启手段。新菜单项在 `handle_menu_event` 里按固定顺序先保存窗口状态、调 `supervisor::shutdown()` 优雅回收 Node 子进程、释放单实例 socket，再拉起新进程并 `app.exit(0)`；顺序由纯函数 `restart_steps()` 与静态守卫测试锁定，devtools/重新加载/关于簇与托盘保持原样。
 - **重启拉起路径选择（实测结论）**：本机外壳由 `systemd-run --user --unit=dsh-tauri-user` 启动，unit 的 `Restart=no`、`KillMode=control-group`。实测同 cgroup 内在 MainPID 退出后派生的兄弟进程会被 systemd 一并清掉（独立 `dsh-cgroup-probe3` 单元探针：子 sleep 随主进程退出而消失），所以不用 Tauri 2.12.7 的 `app.restart()` / `app.relaunch()`（它们会在旧进程退出前 spawn 到同一 cgroup）。改为由独立 `dsh-tauri-restart-helper` 临时单元运行一段 `sh -c` 助手：轮询旧 PID 消失（上限 10 秒），再用 `systemd-run --user --collect --unit=dsh-tauri-user -- <当前可执行文件>` 起新实例；不改任何系统 unit 配置，不触碰已有实例。无 systemd 用户管理器时回退 `setsid sh -c`。
 - Rust 单测新增 3 项（菜单静态守卫、关停顺序纯函数与 handler 静态守卫、助手脚本 wait-then-start 守卫）并更新 accelerator 计数断言，总数 220；`check:docs` 19/0。
