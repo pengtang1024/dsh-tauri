@@ -1,5 +1,11 @@
 # 更新记录
 
+## 0.9.0（2026-11-28）
+
+- **新增：Linux 打包增加 rpm 产物并适配 Fedora/RHEL**：CI 的 Linux 构建从 deb+AppImage 扩为 deb+AppImage+rpm 三种产物（`npx tauri build --bundles deb,appimage,rpm`），Release 自动挂载全部三种安装包；构建环境显式设置 `TAURI_LINUX_AYATANA_APPINDICATOR=0`，让 deb/rpm 的 appindicator 依赖解析为 Fedora 提供的 libappindicator3.so.1（而非 Fedora 不带的 ayatana SONAME），避免 rpm 在 Fedora/RHEL 上因缺失 ayatana 依赖无法安装；tauri.conf.json 的 Linux 依赖同步切换为 appindicator 变体。此前 v0.8.0 兼容矩阵记录 Fedora 缺少 libayatana-appindicator3，本版从打包侧消除该依赖。
+
+---
+
 ## 0.8.0（2026-11-28）
 
 - **改进：去 zenity 化 + KDE 兜底 + 多发行版依赖文档**：关于/运行状态面板改用自绘 GTK3 对话框（复用 picker.rs 的主线程建窗 + async 命令 + mpsc/spawn_blocking 线程模型，保持 about_text 的 64 列排版，zenity 仅作降级），目录选择兜底链扩为 GTK → zenity → kdialog → 可操作错误（列出 apt/dnf/pacman/zypper/apk 安装命令；kdialog 取消按退出码 1 判定，KDE 官方脚本说明，本机无 kdialog 未做真机交互）；助手自检增加 kdialog（6 项）；README 与 7 语言 DETAIL 依赖段区分硬依赖（GTK3/webkit2gtk-4.1/libsoup-3.0/librsvg2/appindicator）与可选增强（wl-clipboard/notify-send/xdg-open/zenity/kdialog），补 dnf/pacman/zypper/apk 包名并引用 COMPAT_MATRIX 实测；DEVELOPMENT 与 DESKTOP_BRIDGE 同步。新增 2 项 Rust 单测（kdialog argv 与错误提示文案），总数 216。Fedora 42 KVM 实测：最小安装缺 10 个库，`dnf install fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11`（exit 0）后 ldd 无 not found，headless 下 GTK backend panic 属预期；`libayatana-appindicator3` NOT_FOUND（只有 ABI 不同的 `libappindicator-gtk3`），Fedora/RHEL 系托盘不保证可用，待上游换后端；助手包安装 exit 0 但命令路径未复验。Arch 官方包数据库核验 `webkit2gtk-4.1` / `libayatana-appindicator`（Arch 有 ayatana 版）/ `zenity` / `kdialog` / `wl-clipboard` / `libnotify` / `xdg-utils` 均存在，VM 因 cloud-init 未生效启动失败，不写成真机实测。
