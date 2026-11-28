@@ -5,6 +5,7 @@
 //! and runs as a plain Node process — no Electron, no DSH Desktop install.
 
 mod banner;
+mod boot_script;
 mod dsh;
 mod exec;
 mod install;

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
@@ -17,6 +17,15 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 const SUPPORT_ID: &str = "support";
 const ABOUT_ID: &str = "about";
 const RESTART_ID: &str = "restart";
+/// Profile switching: two mutually exclusive checks inside one Profile
+/// submenu. Changing either writes the persistent config, then reuses the
+/// existing clean restart sequence (no app.relaunch under systemd).
+const PROFILE_WEB_ID: &str = "profile-web";
+const PROFILE_DESKTOP_ID: &str = "profile-desktop";
+const PROFILE_SUBMENU_LABEL: &str = "Profile";
+/// Risk notice shown in the menu and the status panel.
+const PROFILE_RISK_NOTICE: &str = "Desktop 与官方端同时运行会争抢 profile；切换前请完全退出官方桌面端";
+
 const DSH_MENU_LABEL: &str = "DSH";
 const SUPPORT_ITEM_LABEL: &str = "支持项目 ⭐";
 /// Label chosen over 「重启应用」: the entry exists to apply a background
@@ -149,10 +158,29 @@ pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let restart = MenuItem::with_id(app, RESTART_ID, RESTART_ITEM_LABEL, true, None::<&str>)?;
     let about = MenuItem::with_id(app, ABOUT_ID, "关于 dsh-tauri", true, None::<&str>)?;
     let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
+    // Profile choice: checked state reflects the effective profile at build
+    // time. An invalid env override cannot make neither entry checked.
+    let home = crate::runtime::env_path("DSH_HOME")
+        .unwrap_or_else(|| crate::runtime::home_dir().join(".dsh"));
+    let profile = crate::dsh::resolve_profile(&home);
+    let desktop_checked = profile == crate::dsh::DESKTOP_PROFILE;
+    let web_item = CheckMenuItem::with_id(
+        app, PROFILE_WEB_ID, "Web（默认）", true, !desktop_checked, None::<&str>
+    )?;
+    let desktop_item = CheckMenuItem::with_id(
+        app, PROFILE_DESKTOP_ID, "Desktop（对标官方）", true, desktop_checked, None::<&str>
+    )?;
+    // Disabled row: visible guidance right where the toggle lives.
+    let profile_warning = MenuItem::with_id(
+        app, "profile-warning", PROFILE_RISK_NOTICE, false, None::<&str>
+    )?;
+    let profile_cluster = Submenu::with_items(
+        app, PROFILE_SUBMENU_LABEL, true, &[&web_item, &desktop_item, &profile_warning]
+    )?;
     // The star sits inside the about cluster, never as a top-level column.
     let about_cluster = Submenu::with_items(app, "关于", true, &[&about, &support])?;
     // Exactly one top-level column: everything the shell owns lives under DSH.
-    let dsh = Submenu::with_items(app, DSH_MENU_LABEL, true, &[&reload, &devtools, &restart, &about_cluster])?;
+    let dsh = Submenu::with_items(app, DSH_MENU_LABEL, true, &[&reload, &devtools, &profile_cluster, &restart, &about_cluster])?;
 
     Menu::with_items(app, &[&dsh])
 }
@@ -216,6 +244,8 @@ struct StatusFacts {
     close_to_tray: bool,
     /// Only DSH_TAURI_PROFILE is read, and only as a string for the panel.
     profile_source: Option<String>,
+    /// Persistent profile choice from ~/.dsh/dsh-tauri-profile.json.
+    persisted_profile: Option<String>,
     helpers: Vec<(&'static str, bool)>
 }
 
@@ -236,6 +266,11 @@ fn status_facts(app: Option<&AppHandle<Wry>>) -> StatusFacts {
         auto_update: crate::runtime::auto_update_enabled(),
         close_to_tray: close_to_tray(),
         profile_source: std::env::var("DSH_TAURI_PROFILE").ok(),
+        persisted_profile: {
+            let home = crate::runtime::env_path("DSH_HOME")
+                .unwrap_or_else(|| crate::runtime::home_dir().join(".dsh"));
+            crate::dsh::persisted_profile(&home)
+        },
         helpers
     }
 }
@@ -256,11 +291,30 @@ fn close_label(keep_alive: bool) -> &'static str {
     }
 }
 
+/// Pure rendering of the effective profile source: an environment override,
+/// the persistent config file, or the default. Only the single profile name is
+/// ever shown; no other environment variable is dumped.
+fn profile_origin_label(env_value: Option<&str>, persisted_value: Option<&str>) -> String {
+    if crate::dsh::valid_profile_name(env_value.unwrap_or("")) {
+        return format!("{}（环境变量指定）", env_value.unwrap_or(""));
+    }
+    if crate::dsh::valid_profile_name(persisted_value.unwrap_or("")) {
+        return format!("{}（持久配置指定）", persisted_value.unwrap_or(""));
+    }
+    "默认 web".to_owned()
+}
+
+/// Pure helper: render the profile conflict warning in the status panel.
+fn profile_conflict_notice() -> &'static str {
+    PROFILE_RISK_NOTICE
+}
+
 /// Pure rendering of the one environment variable that selects the profile.
 /// Only `DSH_TAURI_PROFILE` is ever read (by the caller); no other environment
 /// variable is dumped into the panel. A value with control characters or a
 /// newline can never smuggle a second line into the text view, so it is
 /// rejected and reported as an invalid override.
+#[allow(dead_code)]
 fn profile_source_label(raw: Option<&str>) -> String {
     match raw {
         Some(value) if !value.is_empty()
@@ -484,9 +538,12 @@ fn about_text(info: &serde_json::Value, facts: &StatusFacts) -> String {
     let profile = field("profile");
     lines.push(fact_line("Profile 目录", &format!("{home}/profiles/{profile}")));
     lines.push(fact_line("插件目录", &format!("{home}/profiles/{profile}/node_modules")));
-    lines.push(fact_line("Profile 来源", &profile_source_label(facts.profile_source.as_deref())));
+    lines.push(fact_line("Profile 来源", &profile_origin_label(
+        facts.profile_source.as_deref(), facts.persisted_profile.as_deref()
+    )));
     lines.push(fact_line("会话与存储", &format!("与官方桌面端共享 {home}/sessions")));
     lines.push(value_line(&format!("{home}/storages")));
+    lines.push(fact_line("Profile 风险", profile_conflict_notice()));
     lines.push(fact_line("桌面端隔离", PROFILE_ISOLATION_FACT));
     lines.push(value_line(PROFILE_ISOLATION_FACT_2));
     lines.push(fact_line("插件排障", PLUGIN_TROUBLESHOOT_FACT));
@@ -653,6 +710,31 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
     }
     if id == ABOUT_ID {
         show_about(app);
+        return;
+    }
+    if id == PROFILE_WEB_ID || id == PROFILE_DESKTOP_ID {
+        let profile = if id == PROFILE_DESKTOP_ID {
+            crate::dsh::DESKTOP_PROFILE
+        } else {
+            crate::dsh::DEFAULT_PROFILE
+        };
+        let home = crate::runtime::env_path("DSH_HOME")
+            .unwrap_or_else(|| crate::runtime::home_dir().join(".dsh"));
+        if let Err(error) = crate::dsh::set_persisted_profile(&home, profile) {
+            eprintln!("[dsh-tauri] 无法保存 profile 选择：{error}");
+            return;
+        }
+        // Reuse the exact same clean restart sequence used by the update menu;
+        // never call app.relaunch() under systemd (it would spawn into the
+        // dying cgroup and be killed with the old MainPID).
+        let label = menu_window_label(app.get_webview_window("main").is_some());
+        if let Some(window) = app.get_webview_window(label) {
+            save_window_state(&window);
+        }
+        crate::supervisor::shutdown();
+        if spawn_replacement(app) {
+            app.exit(0);
+        }
         return;
     }
     if id == RESTART_ID {
@@ -969,7 +1051,8 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, profile_source_label, resized_event_is_noop, restart_helper_script, restart_steps, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, RESTART_ID, RESTART_ITEM_LABEL, RESTART_UNIT, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS, RestartStep};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, profile_conflict_notice, profile_origin_label, profile_source_label, resized_event_is_noop,
+    PROFILE_DESKTOP_ID, PROFILE_RISK_NOTICE, PROFILE_WEB_ID, restart_helper_script, restart_steps, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, RESTART_ID, RESTART_ITEM_LABEL, RESTART_UNIT, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS, RestartStep};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -1100,6 +1183,51 @@ mod tests {
         assert!(!menu.contains("全屏") && !menu.contains("set_fullscreen"), "no fullscreen item");
     }
 
+
+    #[test]
+    fn profile_submenu_has_two_check_items_with_stable_ids() {
+        let menu = build_menu_source();
+        let column = menu
+            .split("Submenu::with_items(app, DSH_MENU_LABEL")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("DSH submenu must exist");
+        assert!(column.contains("&profile_cluster"), "Profile cluster must be in DSH column");
+        assert!(menu.contains("Submenu::with_items(\n        app, PROFILE_SUBMENU_LABEL"), "Profile submenu must exist");
+        let cluster = menu
+            .split("Submenu::with_items(\n        app, PROFILE_SUBMENU_LABEL")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("Profile submenu must exist");
+        assert!(cluster.contains("&web_item") && cluster.contains("&desktop_item"),
+            "both Web and Desktop items must be present");
+        assert_eq!(PROFILE_WEB_ID, "profile-web");
+        assert_eq!(PROFILE_DESKTOP_ID, "profile-desktop");
+        assert_eq!(menu.matches("CheckMenuItem::with_id(").count(), 2,
+            "exactly two check items, one per profile");
+        assert!(menu.contains("Web（默认）") && menu.contains("Desktop（对标官方）"),
+            "profile labels must be visible");
+        assert!(menu.contains(PROFILE_RISK_NOTICE) || !PROFILE_RISK_NOTICE.is_empty(),
+            "risk notice must be defined for the status panel");
+        // The restart helper remains the single clean restart path.
+        let source = menu_source();
+        assert!(source.contains("if id == PROFILE_WEB_ID || id == PROFILE_DESKTOP_ID"),
+            "profile switch must be handled in the menu");
+        let handler = source
+            .split("if id == PROFILE_WEB_ID || id == PROFILE_DESKTOP_ID {")
+            .nth(1)
+            .and_then(|tail| tail.split("if id == RESTART_ID {").next())
+            .expect("profile handler must exist");
+        for needle in ["set_persisted_profile", "save_window_state(&window)",
+                       "crate::supervisor::shutdown()", "spawn_replacement(app)", "app.exit(0)"] {
+            assert!(handler.contains(needle), "profile restart missing {needle}");
+        }
+        let code = handler.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>().join("\n");
+        assert!(!code.contains("app.relaunch"), "no in-process restart under systemd");
+    }
+
     #[test]
     fn restart_runs_in_save_shutdown_then_spawn_order() {
         // The enum is the single source of truth for the mandatory order.
@@ -1221,11 +1349,12 @@ mod tests {
         // fullscreen, which is deliberately not a menu item here.
         assert!(!menu.contains("Some(\"Cmd"), "command-style shortcut hints must be gone");
         assert!(!menu.contains("F11"), "F11 hint must be gone");
-        assert_eq!(menu.matches("None::<&str>").count(), 5, "reload/devtools/restart/about/support are accelerator-free");
+        assert_eq!(menu.matches("None::<&str>").count(), 8, "five action items, two profile checks and the risk row are accelerator-free");
     }
 
     fn facts() -> StatusFacts {
         StatusFacts {
+            persisted_profile: None,
             source: Some("仓库 runtime/（checkout）"),
             updatable: false,
             version: Some("0.2.2-rc.5".to_owned()),
@@ -1279,6 +1408,16 @@ mod tests {
         // shell_info may carry JSON nulls; the panel must stay readable.
         let empty = about_text(&serde_json::json!({ "runtime": null, "home": "", "profile": null, "desktopVersion": null }), &facts());
         assert_eq!(empty.matches("未设置").count(), 11, "null/empty fields fall back across all path facts (version shown twice)");
+    }
+
+
+    #[test]
+    fn profile_origin_label_shows_environment_persisted_or_default() {
+        assert_eq!(profile_origin_label(Some("desktop"), Some("web")), "desktop（环境变量指定）");
+        assert_eq!(profile_origin_label(None, Some("desktop")), "desktop（持久配置指定）");
+        assert_eq!(profile_origin_label(None, None), "默认 web");
+        assert_eq!(profile_origin_label(Some("bad name"), Some("custom-1")), "custom-1（持久配置指定）");
+        assert!(profile_conflict_notice().contains("官方桌面端"));
     }
 
     #[test]
@@ -1372,7 +1511,7 @@ mod tests {
             .lines()
             .filter(|line| !line.starts_with(' ') && line.contains(": "))
             .collect();
-        assert_eq!(fact_lines.len(), 16, "sixteen labelled facts (title and continuations excluded)");
+        assert_eq!(fact_lines.len(), 17, "seventeen labelled facts (title and continuations excluded)");
         for line in fact_lines.iter().skip(1) {
             let colon = line.find(": ").unwrap_or_else(|| panic!("label missing colon: {line:?}"));
             assert_eq!(display_cols(&line[..colon]), LABEL_COLS, "labels share one column: {line:?}");
@@ -1401,6 +1540,7 @@ mod tests {
             auto_update: false,
             close_to_tray: false,
             profile_source: None,
+            persisted_profile: None,
             helpers: vec![]
         };
         let text = about_text(&serde_json::Value::Null, &empty_facts);

@@ -5,6 +5,7 @@
 //! module only owns the child process and the window hand-off.
 
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,6 +16,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use crate::banner::web_url;
+use crate::boot_script::BootConfig;
 use crate::dsh::Config;
 use crate::progress::{self, Stage};
 
@@ -189,6 +191,7 @@ fn run(app: &AppHandle) -> Result<(), String> {
     progress::set(Stage::Locating, "正在查找 DSH 运行时");
     let config = Config::resolve(Some(app))?;
     eprintln!("[dsh-tauri] runtime {} (profile {})", config.entry.display(), config.profile);
+    let desktop = config.profile == crate::dsh::DESKTOP_PROFILE;
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -213,14 +216,25 @@ fn run(app: &AppHandle) -> Result<(), String> {
                 }
                 eprintln!("[dsh-tauri] DSH exited unexpectedly ({reason}), restart {attempt}/{MAX_RESTARTS}");
                 if attempt >= MAX_RESTARTS {
-                    return Err(format!(
-                        "DSH 服务反复退出：{reason}\n\n请重试；如果仍然失败，在终端里手动运行 `dsh web` 查看完整日志。"
-                    ));
+                    return Err(if desktop {
+                        desktop_failure_message(&reason)
+                    } else {
+                        format!(
+                            "DSH 服务反复退出：{reason}\n\n请重试；如果仍然失败，在终端里手动运行 `dsh web` 查看完整日志。"
+                        )
+                    });
                 }
                 std::thread::sleep(std::time::Duration::from_secs(2));
             }
         }
     }
+}
+
+/// Pure text for a failed desktop-profile launch. No fallback to CLI web:
+/// the official profile is managed by runProfile and mixing the two entry
+/// points would double-apply patch layers or race the official desktop client.
+pub(crate) fn desktop_failure_message(reason: &str) -> String {
+    format!("Desktop profile 启动失败：{reason}\n\n请切回 Web profile，或检查官方桌面端是否已完全退出后重试。")
 }
 
 /// Stop a server that was spawned but cannot be supervised (a pipe is missing).
@@ -234,7 +248,13 @@ fn stop_failed_server(child: &mut Child, error: &str) -> String {
 
 /// One server lifetime. `None` means the shell asked it to stop.
 fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> {
-    let mut child = spawn_server(config)?;
+    let mut child = spawn_server(config).map_err(|error| {
+        if config.profile == crate::dsh::DESKTOP_PROFILE {
+            desktop_failure_message(&error)
+        } else {
+            error
+        }
+    })?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let (stdout, stderr) = match (stdout, stderr) {
@@ -300,18 +320,61 @@ fn run_once(app: &AppHandle, config: &Config) -> Result<Option<String>, String> 
     Ok(Some(exit_reason(pid)))
 }
 
-/// Build and spawn `node <entry> --profile … --port 0`, detached from our stdin.
+/// Prepare the generated desktop launcher and its minimal runtime patch.
+///
+/// Returns the launcher path and the JSON configuration to pass through
+/// DSH_TAURI_BOOT_CONFIG. Only the outer shell writes files: all profile and
+/// home patch layers are loaded by runProfile itself.
+fn prepare_desktop_boot(config: &Config) -> Result<(PathBuf, String), String> {
+    let home = config.home.clone();
+    let boot = crate::boot_script::boot_dir(&home);
+    crate::boot_script::ensure_module_link(&boot, &config.runtime)?;
+    let patch = crate::boot_script::runtime_patch_path(&home);
+    crate::boot_script::write_runtime_patch(&boot, &crate::boot_script::render_runtime_patch({
+        option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0")
+    }))?;
+    let desktop_version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0");
+    let pnpm = std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join("pnpm"))
+                .find(|candidate| candidate.is_file())
+        });
+    let pnpm_ref = pnpm.as_deref();
+    let boot_config = BootConfig {
+        profile: &config.profile,
+        profile_dir: &config.profile_dir,
+        host: &config.host,
+        desktop_version,
+        pnpm: pnpm_ref,
+    };
+    let script = crate::boot_script::render_boot_script(&boot_config);
+    let path = crate::boot_script::write_boot_script(&boot, &script)?;
+    let env_payload = crate::boot_script::render_boot_config(&boot_config, &patch);
+    Ok((path, env_payload))
+}
+
+/// Build and spawn the DSH server, detached from our stdin.
 fn spawn_server(config: &Config) -> Result<Child, String> {
     let mut command = Command::new(&config.node);
+    if config.profile == crate::dsh::DESKTOP_PROFILE {
+        let (script, payload) = prepare_desktop_boot(config)?;
+        command
+            .arg(&script)
+            .env(crate::boot_script::BOOT_CONFIG_ENV, payload)
+            .env(crate::boot_script::CLIENT_VERSION_ENV, option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0"));
+    } else {
+        command
+            .arg(&config.entry)
+            .arg("--profile")
+            .arg(&config.profile)
+            .arg("--host")
+            .arg(&config.host)
+            .arg("--port")
+            .arg("0")
+            .arg("--no-open");
+    }
     command
-        .arg(&config.entry)
-        .arg("--profile")
-        .arg(&config.profile)
-        .arg("--host")
-        .arg(&config.host)
-        .arg("--port")
-        .arg("0")
-        .arg("--no-open")
         .env("DSH_HOME", &config.home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -457,8 +520,9 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        claim_shutdown, classify_url_wait, mark_ready, missing_session_reason, recover_lock,
-        restart_decision, should_report_timeout, spawn_failed_message, startup_timeout_message,
+        claim_shutdown, classify_url_wait, desktop_failure_message, mark_ready,
+        missing_session_reason, recover_lock, restart_decision, should_report_timeout,
+        spawn_failed_message, startup_timeout_message,
         term_result_ok, UrlEvent, UrlWait, RESTART_RESET_AFTER, WEB_URL_TIMEOUT,
     };
 
@@ -539,6 +603,16 @@ mod tests {
         let message = spawn_failed_message(&error);
         assert!(message.starts_with("无法启动服务监控线程"), "unexpected message: {message}");
         assert!(message.contains("resource temporarily unavailable"), "error lost: {message}");
+    }
+
+
+    #[test]
+    fn desktop_failure_message_has_no_cli_fallback_and_is_actionable() {
+        let message = desktop_failure_message("exit code 1");
+        assert!(message.contains("Desktop profile 启动失败"), "unexpected: {message}");
+        assert!(message.contains("exit code 1"), "reason lost: {message}");
+        assert!(message.contains("切回 Web"), "no fallback guidance: {message}");
+        assert!(message.contains("官方桌面端"), "no conflict guidance: {message}");
     }
 
     #[test]
