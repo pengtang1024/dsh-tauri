@@ -155,6 +155,85 @@
           .git/info/exclude 中仅移除本人新增的 .tmp-vm-ubu090/ 行，其它轨道（如 .tmp-vm-fed090/）行保留不动。
 
 
+### v0.9.0 — Fedora/RHEL（rpm + AppImage）
+
+> 本节由子 agent vm-rpm090 在 KVM 中实测追加，只记录 v0.9.0 本轮结果；上文各段保持 v0.7.2 原样，其中「Fedora 无 rpm 产物」「libayatana-appindicator3 不可满足」两条结论**仅对 v0.7.2 成立**，v0.9.0 已改变（见下）。
+> 测试对象：v0.9.0（master HEAD 9eb2665）。产物来自 GitHub Release v0.9.0，非本地构建：
+> - rpm：DSH.Tauri-0.9.0-1.x86_64.rpm（4,004,713 B，sha256 29a9ff7c84e1d13d5b61bf90dd837b8b7cdf23f4c0a6191d5bf46cb072dfa544），https://github.com/pengtang1024/dsh-tauri/releases/download/v0.9.0/DSH.Tauri-0.9.0-1.x86_64.rpm
+> - AppImage：DSH.Tauri_0.9.0_amd64.AppImage（82,590,200 B，sha256 40f9f2ef8b23fa96ec0070dc88d45b6dc4663ff5854285b698df85892a51452e），https://github.com/pengtang1024/dsh-tauri/releases/download/v0.9.0/DSH.Tauri_0.9.0_amd64.AppImage
+> VM：dsh-compat-fed090，Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2（sha256 e401a4db2e5e04d1967b6729774faa96da629bcf3ba90b67d8d9cce9906bec0f），25 GiB qcow2 overlay，2 vCPU / 4 GiB RAM，NAT（network=default），NoCloud seed（xorriso 生成 CIDATA ISO，user-data 注入 pt 用户 + ed25519 公钥，已回读校验）。VM 内无 X11/Xorg/X server，只做 headless 装包、依赖与启动探测。
+
+| 格式 | 安装结果 | 依赖闭合 | 缺失依赖 | 启动（headless） | 备注 |
+|---|---|---|---|---|---|
+| **.rpm**（新增格式） | ✅ sudo dnf install -y /tmp/dsh-0.9.0.rpm exit 0，277 包事务 Complete! | ✅ sudo dnf check exit 0 无输出；ldd /usr/bin/dsh-tauri 无 not found | 无。**未出现 nothing provides libayatana-appindicator3.so.1**（本次修复核心目标） | ❌ exit 101：tao event_loop.rs:219 → gtk::rt::init Failed to initialize GTK（无显示后端预期，非缺库） | dnf 自动装齐 libappindicator-gtk3 / libdbusmenu-gtk3 / webkit2gtk4.1 / gtk3；托盘 SONAME 有真实提供者 |
+| **AppImage** | ✅ --appimage-extract exit 0 → /tmp/squashfs-root/usr/bin/dsh-tauri | ✅ 8 包已就位，ldd 无 not found | 无（本次 rpm 事务已把 8 个基础库全部带入；单独执行 8 包 dnf install exit 0，显示 Nothing to do） | ❌ 解包二进制与 AppImage 直启均 exit 101，同一 GTK backend panic（headless 预期） | 与 v0.7.2 对比：不再需要单独补库（若系统未装 rpm，仍须先补这 8 包） |
+
+#### rpm 核心验证（逐条命令 + 退出码）
+
+    # 干净事务：先卸载再重装，保留完整依赖日志
+    sudo dnf remove -y dsh-tauri                       # REMOVE_EXIT=0（dnf history ID 4，Altered 277）
+    sudo dnf install -y /tmp/dsh-0.9.0.rpm             # INSTALL2_EXIT=0（dnf history ID 5，Altered 277）
+        # Transaction Summary: Installing: 277 packages；Total 230 MiB；结尾 Complete!
+        # 事务中实际装入的关键包（日志原行）：
+        #   [240/279] Installing gtk3-0:3.24.52-1.fc42.x86_64
+        #   [241/279] Installing libdbusmenu-gtk3-0:16.04.0-29.fc42.x86_64
+        #   [242/279] Installing libappindicator-gtk3-0:12.10.1-8.fc42.x86_64
+        #   [249/279] Installing webkit2gtk4.1-0:2.52.3-1.fc42.x86_64
+    grep -i 'nothing provides.*ayatana' /tmp/dnf-install2.log
+        # 无匹配 → AYATANA_FAILURE=ABSENT（核心修复目标：dnf 不再报 ayatana 依赖不可满足）
+    rpm -qpR /tmp/dsh-0.9.0.rpm                        # exit 0：
+        # libappindicator3.so.1()(64bit)
+        # libgtk-3.so.0()(64bit)
+        # libwebkit2gtk-4.1.so.0()(64bit)
+        # rpmlib(CompressedFileNames) <= 3.0.4-1 / rpmlib(FileDigests) <= 4.6.0-1 / rpmlib(PayloadFilesHavePrefix) <= 4.0-1
+        # 三项 SONAME 齐全，且无 libayatana-appindicator3.so.1
+    rpm -qi dsh-tauri                                  # QI_EXIT=0：Version 0.9.0 / Release 1 / x86_64 / MIT / 14724036 B
+    sudo dnf check                                     # DNF_CHECK_EXIT=0，无输出（依赖图闭合）
+    ldd /usr/bin/dsh-tauri                             # LDD_EXIT=0；grep 'not found' → LDD_NO_NOT_FOUND
+        # libwebkit2gtk-4.1.so.0 / libgtk-3.so.0 均解析到 /lib64/
+    rpm -q libappindicator-gtk3 webkit2gtk4.1 gtk3     # libappindicator-gtk3-12.10.1-8.fc42.x86_64 /
+        # webkit2gtk4.1-2.52.3-1.fc42.x86_64 / gtk3-3.24.52-1.fc42.x86_64
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 /usr/bin/dsh-tauri --version   # RPM_LAUNCH_EXIT=101
+        # tao-0.37.3 event_loop.rs:219: Failed to initialize gtk backend!（headless 预期）
+
+#### AppImage 验证（逐条命令 + 退出码）
+
+    cd /tmp && chmod +x dsh-0.9.0.AppImage
+    ./dsh-0.9.0.AppImage --appimage-extract            # EXTRACT_EXIT=0 → /tmp/squashfs-root/usr/bin/dsh-tauri (14741297 B)
+    ldd /tmp/squashfs-root/usr/bin/dsh-tauri | awk '/not found/{print $1}' | sort -u
+                                                       # 输出为空：LDD_ASIS_EXIT=0（rpm 事务已补齐所有基础库）
+    rpm -q fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11
+        # 八包全部存在：fribidi-1.0.16-2.fc42 / fontconfig-2.16.0-2.fc42 / libxcb-1.17.0-5.fc42 /
+        # mesa-libgbm-25.1.9-1.fc42 / libdrm-2.4.133-1.fc42 / mesa-libGL-25.1.9-1.fc42 /
+        # mesa-libEGL-25.1.9-1.fc42 / libX11-1.8.13-1.fc42（均 x86_64）
+    sudo dnf -y install fribidi fontconfig libxcb mesa-libgbm libdrm mesa-libGL mesa-libEGL libX11
+                                                       # DNF_8PKGS_EXIT=0，Nothing to do（已由 rpm 事务满足）
+    ldd /tmp/squashfs-root/usr/bin/dsh-tauri           # LDD_AI_EXIT=0；LDD_AI_NO_NOT_FOUND
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 ./squashfs-root/usr/bin/dsh-tauri --version
+                                                       # AI_LAUNCH_EXIT=101（同一 GTK backend panic，headless 预期）
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 ./dsh-0.9.0.AppImage
+                                                       # AI_DIRECT_EXIT=101（同上）
+
+#### 托盘依赖（SONAME 提供者）
+
+    rpm -q --whatprovides 'libappindicator3.so.1()(64bit)'
+        # libappindicator-gtk3-12.10.1-8.fc42.x86_64；PROVIDES_EXIT=0
+    # 结论：Fedora 42 仓库确有包提供 rpm 声明的 libappindicator3.so.1；dnf 会自动装该包，
+    #       ABI 要求已满足。托盘图标是否在真实 Wayland 桌面上显示，须 GUI 实机验证（VM 禁 X11 且为 Cloud 无桌面）。
+    # 对比 v0.7.2：当时 AppImage 走的是 ayatana SONAME，Fedora 无对应包；v0.9.0 切到
+    #       libappindicator3 SONAME 后，这一缺口在 Fedora/RHEL 上已消除。
+
+#### 资源释放与清理（硬约束核对）
+
+    # 释放前：virsh list --all 含 dsh-compat-fed090（运行，Id 7）；du -sh /mnt/data/vm = 48G；
+    #         qemu-system 进程含 fed090；宿主 PID 3524464（dsh-tauri）全程未动。
+    virsh destroy dsh-compat-fed090                    # exit 0
+    virsh undefine dsh-compat-fed090 --remove-all-storage  # exit 0；删除卷 vda（overlay）与 sda（seed ISO）
+    # 释放后：域列表无 dsh-compat-fed090；overlay/seed ISO 文件不存在；du -sh /mnt/data/vm = 48G（回到基线）；
+    #         无 fed090 qemu 进程；PID 3524464 仍在。并发的 dsh-compat-ubu090 属另一子 agent，未触碰。
+    # 临时目录 .tmp-vm-fed090/（镜像、seed、SSH key、产物）用完删除，并移除 .git/info/exclude 中的 .tmp-vm-fed090/ 条目。
+    # 宿主零 apt/apt-get 包操作，包管理全部在 VM 内 dnf；未配置 X11；未用 pgrep -f 批量 kill；未改源码/版本/CI；未 commit、未 push。
+
 ## 结论与建议
 
 1. Debian/Ubuntu .deb 路线是唯一完整验证通过的产物路径：装包、依赖闭合、外部助手命令均达标；gtk 启动失败纯粹因 VM 禁止显示后端，不代表 GUI 不可用。建议把「headless 装包/依赖冒烟」固化为 CI 门禁。
