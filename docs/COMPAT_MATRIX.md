@@ -234,6 +234,119 @@
     # 临时目录 .tmp-vm-fed090/（镜像、seed、SSH key、产物）用完删除，并移除 .git/info/exclude 中的 .tmp-vm-fed090/ 条目。
     # 宿主零 apt/apt-get 包操作，包管理全部在 VM 内 dnf；未配置 X11；未用 pgrep -f 批量 kill；未改源码/版本/CI；未 commit、未 push。
 
+### v0.9.0 — openSUSE（AppImage）
+
+> 本节由子 agent vm-suse090 追加，仅记录 v0.9.0 本轮 openSUSE 实测，不改上文任何段落。测试对象来自 GitHub Release v0.9.0（非本地构建），github.com 直连超时，改用已认证 api.github.com asset 端点下载：
+> - AppImage：DSH.Tauri_0.9.0_amd64.AppImage（asset id 802835961，82,590,200 B，sha256 `40f9f2ef8b23fa96ec0070dc88d45b6dc4663ff5854285b698df85892a51452e`）— gh api -H 'Accept: application/octet-stream' exit 0，大小/哈希与官方一致。
+> - rpm：DSH.Tauri-0.9.0-1.x86_64.rpm（asset id 802835963，4,004,713 B，sha256 `29a9ff7c84e1d13d5b61bf90dd837b8b7cdf23f4c0a6191d5bf46cb072dfa544`）— 同上，用于加分项 zypper 实测。
+> 镜像：openSUSE Leap 15.6 x86_64 NoCloud cloud qcow2（https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.6/images/openSUSE-Leap-15.6.x86_64-NoCloud.qcow2 ，731,250,688 B，sha256 `d91ddc27554093a01bcc5255f8b06a2f9d4fab138082ca260719d5ddc086b411`，与官方 .sha256 一致）；另下 Tumbleweed Minimal-VM Cloud qcow2（https://download.opensuse.org/tumbleweed/appliances/openSUSE-Tumbleweed-Minimal-VM.x86_64-Cloud.qcow2 ，318,066,176 B，sha256 `6fb81a99cc3cdfa565db8c683ff44b7e3d8a1c6a8a585ac8320c9ac0058fe727`）。
+> VM：dsh-compat-suse090，2 vCPU / 4 GiB / 25 GiB qcow2 overlay（backing = 官方 cloud 镜像），NAT（network=default），无 X11/Xorg/X server，只做 headless（DISPLAY=、WAYLAND_DISPLAY=）。宿主零 apt/apt-get 包操作，包管理全在 VM 内 zypper；未用 pgrep -f 批量 kill；宿主 PID 3524464 全程未动；未改源码/版本/CI；未 commit。
+
+| 发行版 | 包格式 | 安装结果 | 依赖闭合 | 启动（headless） | 备注 |
+|---|---|---|---|---|---|
+| **openSUSE Leap 15.6**（kernel 6.4.0-150600.23.146-default，glibc 2.38） | AppImage | ✅ scp/chmod/--appimage-extract 全 exit 0；干净系统缺 8 个 SONAME，zypper 装 7 包 exit 0 | ⚠️ 硬 SONAME 缺失清零，但仍有 2 项 ABI 缺口：weak `GLIBC_2.39` not found、bundled cairo 的 `FT_Get_Transform` undefined（系统 freetype 2.10.4 旧） | ❌ exit 127（补库后仍卡在 cairo 符号）；用 `LD_LIBRARY_PATH=/usr/lib64:/lib64` 强制系统 cairo 优先后 ✅ exit 101（tao GTK backend panic，headless 预期） | 不是「装几包即可开箱」：Leap 14 基线偏旧，AppImage 自带 cairo 要求更新的 freetype；默认路径需在 Release 说明前置条件 |
+| **openSUSE Leap 15.6** | .rpm（本轮实测可用，v0.7.2 的「无 rpm 产物」结论已过时） | ✅ `sudo zypper -n --no-gpg-checks install -y /tmp/dsh-0.9.0.rpm` exit 0（368 包事务完成）；默认不带 --no-gpg-checks 会因「软件包包头未签名」exit 8 | ✅ `sudo zypper verify` = 已满足全部已安装软件包的依赖关系；ldd 仅剩 weak GLIBC_2.39 提示（非致命） | ❌ exit 101：tao event_loop.rs:219 → gtk::rt::init Failed to initialize GTK（headless 预期） | rpm 事务自动带入 webkit2gtk4.1 2.52.1 / gtk3 3.24.43 / libappindicator3-1 12.10.1；SONAME 声明不含 ayatana，无需 ayatana 包 |
+| **openSUSE Tumbleweed**（Minimal-VM Cloud） | AppImage | ⚠️ SKIP（VM shell 未拿到）：VM 正常启动但始终未取得自己的 DHCP 租约、qemu-guest-agent 不响应、串口无输出；探测 SSH 端口时误连到并发 Arch 轨道的 192.168.122.54（MAC 52:54:00:a7:17:2e，后经 domdumpxml 核实，非本 VM），按 15 分钟上限放弃 | 未验证 | 未验证 | 不伪造结论；Leap 已提供有效 openSUSE 覆盖 |
+
+#### 拿 shell 的方法（Leap 15.6）
+
+    # xorriso 造 NoCloud seed（本机无 cloud-localds / genisoimage）
+    # seed/user-data: #cloud-config，users: pt + ssh_authorized_keys(ed25519 公钥) + sudo NOPASSWD:ALL；
+    #                 packages: openssh；runcmd: systemctl enable/start sshd.service
+    # seed/meta-data: instance-id=dsh-compat-suse090, local-hostname=dsh-suse090
+    xorriso -as mkisofs -output seed.iso -volid CIDATA -joliet -rock seed/   # SEED_EXIT=0
+    qemu-img create -f qcow2 -F qcow2 -b leap15.6.qcow2 leap090.qcow2 25G   # OVERLAY_EXIT=0
+    # libvirt-qemu 需读 overlay/seed/backing：dsh-root --shell 'chgrp 991 ... && chmod 664 ...'  # exit 0
+    virt-install --name dsh-compat-suse090 --memory 4096 --vcpus 2 --os-variant opensuse15.6 \
+      --disk ...,format=qcow2,bus=virtio --disk seed.iso,device=cdrom \
+      --network network=default,model=virtio --graphics none --console pty,target_type=serial \
+      --import --noautoconsole                                              # VI_EXIT=0
+    # 首次 virt-install 误用 --os-variant sles15sp3 → exit 1（未知 OS 名）；改 opensuse15.6 后成功
+    virsh net-dhcp-leases default                        # Leap 首轮 192.168.122.162，重启后 192.168.122.58
+    ssh -o BatchMode=yes -o IdentitiesOnly=yes -i .tmp-vm-suse090/id_ed25519 pt@<IP>   # SSH_EXIT=0
+        # cat /etc/os-release → openSUSE Leap 15.6；id → uid=1000(pt)；sudo -n true → SUDO_OK
+    # cloud-init 首次启动会持 zypper 锁（refresh / install openssh），前 3 次 zypper exit 7；
+    # 等待 cloud-init 的 zypper 进程结束后再装包即正常。
+
+#### ① AppImage 解包（退出码逐条）
+
+    gh api repos/pengtang1024/dsh-tauri/releases/assets/802835961 -H 'Accept: application/octet-stream' > dsh-0.9.0.AppImage
+                                                                   # DL_EXIT=0；82,590,200 B；sha256 与官方一致
+    scp dsh-0.9.0.AppImage pt@IP:/tmp/dsh-0.9.0.AppImage           # SCP_EXIT=0；VM 内 sha256 一致
+    chmod +x /tmp/dsh-0.9.0.AppImage                              # CHMOD_EXIT=0
+    cd /tmp && ./dsh-0.9.0.AppImage --appimage-extract            # EXTRACT_EXIT=0 → /tmp/squashfs-root/usr/bin/dsh-tauri（14,741,297 B）
+
+#### ② 干净系统 ldd 缺失 SONAME（装包前）
+
+    ldd /tmp/squashfs-root/usr/bin/dsh-tauri > /tmp/ldd-before.txt   # LDD_EXIT=0；共 138 行
+    grep 'not found' /tmp/ldd-before.txt | sed -E 's/^[[:space:]]*([^ ]+).*/\1/' | sort -u
+        # 8 个真实缺失 SONAME：libdrm.so.2、libEGL.so.1、libfribidi.so.0、libgbm.so.1、
+        #   libGL.so.1、libharfbuzz.so.0、libwayland-client.so.0、libX11-xcb.so.1
+    for c in zenity wl-copy wl-paste notify-send xdg-open kdialog; do command -v $c || echo MISSING:$c; done
+        # 6 项全 MISSING（最小 cloud 镜像无桌面助手命令）
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 /tmp/squashfs-root/usr/bin/dsh-tauri --version
+        # PRE_VERSION_EXIT=127；stderr: error while loading shared libraries: libfribidi.so.0
+
+#### ③ zypper 包名与命令（SONAME → 包名逐个经 zypper search --provides 核实）
+
+    sudo zypper -n refresh                                         # 首次 exit 7（cloud-init 持锁）；重试 exit 0
+    sudo zypper -n install -y libdrm2 libglvnd libfribidi0 libgbm1 libharfbuzz0 libwayland-client0 libX11-xcb1
+                                                                   # LIBS_INSTALL_EXIT=0（34 包事务完成）
+    sudo zypper -n install -y zenity wl-clipboard libnotify-tools xdg-utils
+                                                                   # HELPERS_EXIT=0（217 包事务完成）
+    for c in zenity wl-copy wl-paste notify-send xdg-open kdialog; do command -v $c || echo MISSING:$c; done
+        # /usr/bin/zenity、/usr/bin/wl-copy、/usr/bin/wl-paste、/usr/bin/notify-send、/usr/bin/xdg-open 全就位；kdialog 缺省（可选增强）
+
+  准确包名映射（Leap 15.6 实测）：`libdrm.so.2`→`libdrm2`（libdrm 2.4.118 系）；`libEGL.so.1` 与 `libGL.so.1`→`libglvnd` 1.7.0-150600.1.2（实际提供者为 Mesa-libEGL1 / Mesa-libGL1 23.3.4）；`libfribidi.so.0`→`libfribidi0`；`libgbm.so.1`→`libgbm1` 23.3.4-150600.83.3.1；`libharfbuzz.so.0`→`libharfbuzz0` 8.3.0-150600.3.3.1；`libwayland-client.so.0`→`libwayland-client0`；`libX11-xcb.so.1`→`libX11-xcb1` 1.8.7-150600.3.6.1。助手包：`zenity` / `wl-clipboard` / `libnotify-tools`（提供 notify-send；Debian 系叫 libnotify-bin）/ `xdg-utils`（提供 xdg-open）。注意 Leap 仓库没有 Debian 式 webkit2gtk-4.1 包名，对应包是 `libwebkit2gtk-4_1-0` 2.52.1 与 `libgtk-3-0` 3.24.43；托盘库 `libappindicator3-1` 12.10.1 在 Main Repository 可用（提供 libappindicator3.so.1），ayatana 版无需。
+
+#### ④ 补库后 ldd（关键差异）
+
+    ldd /tmp/squashfs-root/usr/bin/dsh-tauri > /tmp/ldd-after.txt       # LDD_EXIT=0；130 行
+    grep -c 'not found' /tmp/ldd-after.txt                              # 1（仅 weak version 提示，无硬 SONAME 缺失）
+        # /lib64/libc.so.6: weak version `GLIBC_2.39' not found (required by dsh-tauri)
+    DISPLAY= WAYLAND_DISPLAY= timeout 25 /tmp/squashfs-root/usr/bin/dsh-tauri --version
+        # POST_VERSION_EXIT=127
+        # stderr: weak version `GLIBC_2.39' not found；
+        #         symbol lookup error: .../lib/libcairo.so.2: undefined symbol: FT_Get_Transform
+
+  根因：Leap 15.6 基线 glibc 2.38 / libfreetype6 2.10.4，而 AppImage 自带 libcairo.so.2 需要 FreeType 的 `FT_Get_Transform`（2.10.4 未提供），二进制还标记了 weak GLIBC_2.39。这不是「缺 SONAME」，而是老基线发行版的 ABI 缺口：仅补 ③ 的 7 包不足以启动 AppImage。绕过方式（实测有效）：
+
+    DISPLAY= WAYLAND_DISPLAY= LD_LIBRARY_PATH=/usr/lib64:/lib64 timeout 25 /tmp/squashfs-root/usr/bin/dsh-tauri --version
+        # LLP_VERSION_EXIT=101（系统 cairo 1.18.4 优先于 bundled cairo，越过符号错误）
+        # stderr: tao-0.37.3/event_loop.rs:219: Failed to initialize gtk backend!（gtk::rt::init）→ headless 预期失败
+
+#### ⑤ RPM 格式在 openSUSE 上可直接用（加分项）
+
+    gh api repos/pengtang1024/dsh-tauri/releases/assets/802835963 -H 'Accept: application/octet-stream' > dsh-0.9.0.rpm
+                                                                   # DL_EXIT=0；4,004,713 B；sha256 与官方一致
+    scp dsh-0.9.0.rpm pt@IP:/tmp/dsh-0.9.0.rpm                     # SCP_EXIT=0
+    rpm -qpR /tmp/dsh-0.9.0.rpm                                    # exit 0：libappindicator3.so.1 / libgtk-3.so.0 /
+        #   libwebkit2gtk-4.1.so.0（三项 SONAME，无 ayatana）
+    sudo zypper -n install -y /tmp/dsh-0.9.0.rpm                   # RPM_INSTALL_EXIT=8（包头未签名，交互提示 a/r/i 下 -n 中止）
+    sudo zypper -n --no-gpg-checks install -y /tmp/dsh-0.9.0.rpm   # RPM_INSTALL5_EXIT=0（368 包事务完成）
+        # 事务自动带入：libappindicator3-1-12.10.1 / libwebkit2gtk-4_1-0-2.52.1 /
+        #   webkit2gtk-4_1-injected-bundles-2.52.1 / gtk3-3.24.43 / libdbusmenu-gtk3-4
+    rpm -q dsh-tauri                                               # exit 0：dsh-tauri-0.9.0-1.x86_64
+    sudo zypper verify                                             # exit 0：已满足全部已安装软件包的依赖关系
+    ldd /usr/bin/dsh-tauri                                         # LDD_RPM_EXIT=0；仅 weak GLIBC_2.39 提示，无 not found SONAME
+    DISPLAY= WAYLAND_DISPLAY= timeout 25 /usr/bin/dsh-tauri --version
+                                                                   # RPM_VERSION_EXIT=101
+        # tao event_loop.rs:219 → gtk::rt::init Failed to initialize GTK（headless 预期；weak GLIBC_2.39 提示非致命）
+
+  结论：v0.9.0 的 rpm 在 openSUSE Leap 15.6 上**可直接用**（发布包未签名，需 `--no-gpg-checks` 或先导入签名），比 AppImage 路径更干净——rpm 事务自动解析全部 GTK/WebKit/托盘依赖并达到 headless GTK panic；AppImage 则受老基线 glibc/freetype 限制。
+
+#### 资源释放与清理（硬约束核对）
+
+    释放前：virsh list --all → Id 16 dsh-compat-suse090 运行 + dsh-compat-arch090（另一 agent）+ tiny10-live/win11-live（关闭）；
+            du -sh /mnt/data/vm = 48G；qemu-system 中 suse090 进程数 = 1；ps -p 3524464 → /usr/bin/dsh-tauri（未动）
+    virsh destroy dsh-compat-suse090                              # exit 0
+    virsh undefine dsh-compat-suse090 --remove-all-storage        # exit 0；删除卷 vda（leap090.qcow2）与 sda（seed.iso）
+    释放后：virsh list --all → 无 dsh-compat-suse090（arch090 属另一轨道，未触碰）；
+            qemu-system suse090 进程数 = 0；du -sh /mnt/data/vm = 48G（与基线一致）；PID 3524464 仍在
+    清理：临时目录 .tmp-vm-suse090/（两个 cloud 镜像、seed、SSH key、AppImage、rpm、日志）已 rm -rf；
+          .git/info/exclude 中仅移除本人新增的 .tmp-vm-suse090/ 行，其它轨道（.tmp-vm-arch090/ 等）保留不动。
+    全程未配置 X11；未用 pgrep -f 批量 kill；宿主零 apt/apt-get；未改源码/版本/CI；未 commit、未 push。
+
 ## 结论与建议
 
 1. Debian/Ubuntu .deb 路线是唯一完整验证通过的产物路径：装包、依赖闭合、外部助手命令均达标；gtk 启动失败纯粹因 VM 禁止显示后端，不代表 GUI 不可用。建议把「headless 装包/依赖冒烟」固化为 CI 门禁。
@@ -241,3 +354,89 @@
 3. Arch（pacman）包名总体齐全，但滚动发行版的 WebKit 版本（2.54.3）与 AppImage 自带版本差异需真机复验；本次 VM 未起来，明确标为未验证。若要补测，建议换带 cloud-init 的 Arch 镜像或制作带预置 root 密码的自定义镜像。
 4. 外部命令依赖的发行版差异是真实风险：Ubuntu 上助手命令由 deb 强依赖保障；Fedora/Arch 上助手命令与 AppImage 运行库都要用户手动装。当前代码已实现 kdialog 兜底链，且目录选择与关于面板均已改为自绘 GTK（`picker::show_info`）为主路径，zenity/kdialog 仅作兜底降级（task-405 已收口），不再有关于面板依赖 zenity 的缺口。
 5. 资源释放已完成：三台 VM 全部 destroy + undefine --remove-all-storage，磁盘占用回到 48G 基线，无残留域与 qemu 进程。临时工作区 .tmp-compat/（含镜像、seed ISO、SSH key、console 日志）用完即从工作区删除，并还原 .git/info/exclude。
+
+### v0.9.0 — Arch（AppImage）
+
+> 本节由子 agent vm-arch090 追加，只记录 v0.9.0 本轮 Arch 真机 KVM 实测，不改上文任何段落（openSUSE/Ubuntu/Fedora 段保持原样）。测试对象来自 GitHub Release v0.9.0（非本地构建），github.com 直连可能超时，改用已认证 api.github.com asset 端点下载：
+> - AppImage：DSH.Tauri_0.9.0_amd64.AppImage（asset id 802835961，82,590,200 B，sha256 `40f9f2ef8b23fa96ec0070dc88d45b6dc4663ff5854285b698df85892a51452e`）— gh api -H 'Accept: application/octet-stream' exit 0，大小/哈希与官方一致。
+> 镜像：官方 Arch-Linux-x86_64-cloudimg.qcow2（https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2 ，569,933,312 B，sha256 `dbd02830f6eb0fe07ef6e5edaddbae8b577ce4296d9e79118904704cce0a1f60`）。
+> VM：dsh-compat-arch090，2 vCPU / 4 GiB / overlay qcow2（backing = 官方 cloudimg，初始 2 GiB→扩至 30 GiB，btrfs 根分区），NAT（network=default），Arch 内核 7.3.4-arch1-2；无 X11/Xorg/Xvfb，仅 headless（DISPLAY=、WAYLAND_DISPLAY=）。宿主零 apt/apt-get 包操作，包管理全在 VM 内 pacman；未用 pgrep -f 批量 kill；宿主 PID 3524464 全程未动；未改源码/版本/CI；未 commit、未 push。
+
+**上一轮 SKIP 缺口的解决（拿 shell 方法）**：官方 Arch cloudimg 不带 cloud-init/sshd 配置，但 sshd.service 其实已 enable、root 密码为锁定态 `root:*:`。本轮用离线改镜像 + 手动引导拿 shell：
+1. `dsh-root modprobe nbd max_part=8` 加载 NBD（宿主零装包）；qemu-nbd 挂载 cloudimg 的 overlay qcow2，mount /dev/nbd0p3（btrfs）后 `sed -i "s|^root:\*:|root:\$6\$…:|" /etc/shadow` 注入 openssl passwd -6 生成的 SHA-512 root 密码 hash，并写 /etc/ssh/sshd_config.d/99-dsh-kvm.conf（PermitRootLogin yes + PasswordAuthentication yes）；umount + qemu-nbd --disconnect。
+2. virt-install --boot uefi 导入时默认用 OVMF_CODE_4M.ms.fd（secure boot MS keys）导致 GRUB 不出现；`virsh dumpxml` 导出后改 XML 为 /usr/share/OVMF/OVMF_CODE_4M.fd + enrolled-keys=off/secure-boot=off，`virsh undefine --nvram` 再 `virsh define --file` 后启动，GRUB 出现。
+3. pexpect + `virsh console` 回车选中 Arch Linux，serial console root + 注入密码登录成功（`SHELL_OK_0`，id -u = 0）。
+4. 镜像无 systemd .network 配置，eth0 DOWN；用 QEMU guest agent（guest-exec）执行 `ip link set eth0 up; dhclient eth0` 拿到 192.168.122.54，` /usr/bin/sshd` 启动 TCP 22，注入 ed25519 公钥后 SSH 免密登录成功。之后所有验证通过 SSH 执行。
+
+**① AppImage 解包（逐条命令 + 退出码）**
+
+    gh api repos/pengtang1024/dsh-tauri/releases/assets/802835961 -H 'Accept: application/octet-stream' > .tmp-vm-arch090/dsh-0.9.0.AppImage
+                                                                    # DL_EXIT=0；82,590,200 B；宿主 sha256 与官方一致
+    scp -i vm_key dsh-0.9.0.AppImage root@192.168.122.54:/root/dsh-0.9.0.AppImage   # SCP_EXIT=0
+    sha256sum /root/dsh-0.9.0.AppImage                             # 40f9f2ef…51452e，与宿主/官方一致
+    chmod +x /root/dsh-0.9.0.AppImage                              # CHMOD_EXIT=0
+    cd /root && ./dsh-0.9.0.AppImage --appimage-extract            # EXTRACT_EXIT=0 → /root/squashfs-root/usr/bin/dsh-tauri（14,741,297 B）
+
+**② 干净系统 ldd 缺失 SONAME（装包前，系统 185 包，webkit/gtk/mesa/wayland 全无）**
+
+    ldd /root/squashfs-root/usr/bin/dsh-tauri | awk '/not found/{print $1}' | sort -u
+        # 12 个缺失 SONAME：libEGL.so.1、libGL.so.1、libX11-xcb.so.1、libX11.so.6、libdrm.so.2、
+        #   libfontconfig.so.1、libfreetype.so.6、libfribidi.so.0、libgbm.so.1、libharfbuzz.so.0、
+        #   libwayland-client.so.0、libxcb.so.1；ldd 共 159 行
+    pacman -Fy                                                     # FY=0（首次需建文件数据库）
+    for so in ...; do pacman -F "$so"; done                        # 逐 SONAME 映射到准确包名（见下）
+
+**③ pacman 装包（准确包名 + 命令 + 关键坑）**
+
+    pacman-key --init && pacman-key --populate archlinux           # 官方 cloudimg 无 keyring；refresh-keys 因 keyserver 不可达卡住，已终止
+    # 根分区原 1.7Gb btrfs 不足 600MiB 事务：qemu-img resize overlay 30G + parted resizepart 3 100%
+    #   + dsh-root mount btrfs + btrfs filesystem resize max（LDD 前完成；离线 NBD 操作）
+    pacman -S --noconfirm --needed libglvnd libx11 libdrm fontconfig freetype2 fribidi mesa harfbuzz wayland libxcb       zenity wl-clipboard libnotify xdg-utils                      # PACMAN_S=0；114 包事务，Installing 完成
+        # 注：kdialog 会拉入 265 包 KDE/Qt6 栈且撞镜像 404，本轮未装 kdialog（可选兜底，GNOME 不需要）
+        # 注：缺 keyring 时临时把 /etc/pacman.conf 的 SigLevel 改成 Never，装完立刻用备份还原（已核实还原为 Required DatabaseOptional）
+    pacman -Q libglvnd libx11 libdrm fontconfig freetype2 fribidi mesa harfbuzz wayland libxcb zenity wl-clipboard libnotify xdg-utils gtk3
+        # libglvnd 1.7.0-3 / libx11 1.8.14-1 / libdrm 2.4.134-1 / fontconfig 2:2.18.4-1 /
+        # freetype2 2.15.0-1 / fribidi 1.0.18-1 / mesa 1:26.3.1-3 / harfbuzz 15.2.0-1 /
+        # wayland 1.26.0-1 / libxcb 1.17.0-1 / zenity 4.2.2-1 / wl-clipboard 1:2.3.0-1 /
+        # libnotify 0.8.9-1 / xdg-utils 1.2.1-2 / gtk3 1:3.24.52-2（均 [extra]）
+    # SONAME → pacman 包名映射（pacman -F 实测）：libEGL.so.1/libGL.so.1→libglvnd；
+    #   libX11.so.6/libX11-xcb.so.1→libx11；libdrm.so.2→libdrm；libfontconfig.so.1→fontconfig；
+    #   libfreetype.so.6→freetype2；libfribidi.so.0→fribidi；libgbm.so.1→mesa；
+    #   libharfbuzz.so.0→harfbuzz；libwayland-client.so.0→wayland；libxcb.so.1→libxcb
+
+**④ 补库后 ldd**
+
+    ldd /root/squashfs-root/usr/bin/dsh-tauri | grep -c 'not found'   # MISSING_COUNT=0（无 not found）；ldd 共 127 行
+    ldd ... | grep -E 'webkit2gtk|gtk-3|gbm|wayland-client'
+        # libwebkit2gtk-4.1.so.0 与 libgtk-3.so.0 → squashfs-root/usr/bin/../lib（AppImage 自带）；
+        # libwayland-client.so.0 / libgbm.so.1 → /usr/lib（系统）
+
+**⑤ headless --version（预期失败）**
+
+    cd /root; DISPLAY= WAYLAND_DISPLAY= timeout 25 ./dsh-0.9.0.AppImage --version                # VERSION_EXIT=101
+    cd /root; DISPLAY= WAYLAND_DISPLAY= timeout 25 ./squashfs-root/usr/bin/dsh-tauri --version    # BIN_EXIT=101
+        # 两者同一错误：tao-0.37.3/src/platform_impl/linux/event_loop.rs:219
+        #   "Failed to initialize gtk backend!: BoolError { message: "Failed to initialize GTK", … gtk::rt::init, line: 141 }"
+        # 已越过动态库加载阶段，属无显示后端预期失败，非缺库 bug（VM 禁 X11、未配任何显示后端）
+
+**⑥ WebKit 版本差异（Arch 滚动 vs AppImage 自带）**
+
+    pacman -Si webkit2gtk-4.1 | grep Version                        # Version: 2.54.3-1（[extra]，滚动发行版）
+    python3 ctypes CDLL('/root/squashfs-root/usr/lib/libwebkit2gtk-4.1.so.0')
+        # webkit_get_major/minor/micro_version() → BUNDLED_WEBKIT=2.52.6（AppImage 在 Ubuntu 24.04 上构建）
+    # 差异：系统 2.54.3 vs 自带 2.52.6，相差 2 个 minor；AppImage 自带 WebKit/GTK 优先（ldd 指向 squashfs-root），
+    #   故实际运行用自带版本，不受 Arch 系统 WebKit 滚动影响；但自带 cairo/字体等仍与系统库交互，升级基线需回归 GUI。
+    # 助手命令：zenity / wl-copy / wl-paste / notify-send / xdg-open 全部就位；kdialog MISSING（可选）。
+
+**结论**：v0.9.0 AppImage 在 Arch 上补齐 10 类运行库包后 ldd 完全闭合、headless 启动到 GTK backend panic（预期），不再是 v0.7.2 的「VM 起不来 SKIP」。最小 Arch cloudimg 不是开箱即用——需手动注入 root 密码 + 关 secure boot 才能拿 shell，需 dhclient 才有网络，缺 keyring/btrfs 分区偏小是额外坑；Release 说明应给出上述 pacman 前置命令。
+
+**资源释放与清理（硬约束核对）**
+
+    释放前：virsh list --all 含 Id 18 dsh-compat-arch090（运行）+ tiny10-live/win11-live（关闭，属原有）；du -sh /mnt/data/vm = 48G
+    virsh destroy dsh-compat-arch090                                # exit 0
+    virsh undefine dsh-compat-arch090 --nvram                       # exit 0（本轮用自定义 XML 定义，无 --remove-all-storage 的卷；overlay/backing 在 .tmp-vm-arch090/，随目录删除）
+    dsh-root qemu-nbd --disconnect /dev/nbd0                        # 已断开；/mnt/dsh-arch-inspect 已 umount
+    释放后：virsh list --all 仅 tiny10-live/win11-live（均关闭）、grep dsh-compat → 无匹配；du -sh /mnt/data/vm = 48G（与基线一致）；无 qemu-system for arch090 进程；PID 3524464 仍在
+    清理：临时目录 .tmp-vm-arch090/（cloudimg、overlay qcow2、AppImage、SSH key、console 日志、一次性 gcmd.sh/vm.xml、pacman.conf 备份在 VM 内）已 rm -rf；
+          .git/info/exclude 中仅移除本人新增的 .tmp-vm-arch090/ 行，其它轨道行保留不动。
+    全程禁 X11（VM 内无 Xorg/Xvfb）；宿主零 apt/apt-get；未用 pgrep -f 批量 kill（仅按显式域名 destroy/undefine）；PID 3524464 未动；未改源码/版本/CI；未 commit、未 push。
