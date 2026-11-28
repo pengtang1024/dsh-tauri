@@ -83,7 +83,7 @@ jobs:
           # instead of the ayatana SONAME that Fedora does not ship.
           TAURI_LINUX_AYATANA_APPINDICATOR: "0"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dsh-tauri-bundles
           # Cargo puts the workspace target under src-tauri/ unless CARGO_TARGET_DIR says otherwise.
