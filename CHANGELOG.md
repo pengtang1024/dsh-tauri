@@ -1,5 +1,11 @@
 # 更新记录
 
+## 0.9.1（2026-11-28）
+
+- **文档：v0.9.0 三种安装包 × 四大发行版 KVM 实测兼容矩阵**：基于已发布的 v0.9.0（产物均取自 GitHub Release，非本地构建），在 KVM 虚机中实测 deb / AppImage / rpm 三种格式在 Ubuntu 24.04、Fedora 42、Arch Linux、openSUSE Leap 15.6 上的依赖闭合与启动表现，分三个提交追加到 `docs/COMPAT_MATRIX.md`：Ubuntu 24.04 的 deb/AppImage（依赖解析、ldd 无缺失、AppImage 补库清单与 bundled/system 统计）；Fedora 42 的 rpm/AppImage（`dnf install` 事务完成、`libayatana-appindicator3` 缺失结论已被 appindicator 变体消除、ldd 无 not found）；Arch 与 openSUSE 的 AppImage（Arch 滚动 WebKit 2.54.3 与自带 2.52.6 差异、openSUSE `zypper` rpm 事务与 `--no-gpg-checks` 要求）。headless 无显示后端下的 GTK backend panic 属预期，不构成缺库。全程 VM 内禁 X11、宿主零 apt/apt-get 包操作，未触碰用户实例 PID 3524464；本版无代码变更，完整命令、退出码、依赖版本与结论见 `docs/COMPAT_MATRIX.md`。
+
+---
+
 ## 0.9.0（2026-11-28）
 
 - **新增：Linux 打包增加 rpm 产物并适配 Fedora/RHEL**：CI 的 Linux 构建从 deb+AppImage 扩为 deb+AppImage+rpm 三种产物（`npx tauri build --bundles deb,appimage,rpm`），Release 自动挂载全部三种安装包；构建环境显式设置 `TAURI_LINUX_AYATANA_APPINDICATOR=0`，让 deb/rpm 的 appindicator 依赖解析为 Fedora 提供的 libappindicator3.so.1（而非 Fedora 不带的 ayatana SONAME），避免 rpm 在 Fedora/RHEL 上因缺失 ayatana 依赖无法安装；tauri.conf.json 的 Linux 依赖同步切换为 appindicator 变体。此前 v0.8.0 兼容矩阵记录 Fedora 缺少 libayatana-appindicator3，本版从打包侧消除该依赖。
