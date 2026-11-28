@@ -1,6 +1,6 @@
 # 更新记录
 
-## 未发布
+## 0.11.0（2026-11-28）
 
 - **新增：菜单「DSH → 重启以应用更新」**：后台更新只 notify「重启生效」但此前没有一键重启手段。新菜单项在 `handle_menu_event` 里按固定顺序先保存窗口状态、调 `supervisor::shutdown()` 优雅回收 Node 子进程、释放单实例 socket，再拉起新进程并 `app.exit(0)`；顺序由纯函数 `restart_steps()` 与静态守卫测试锁定，devtools/重新加载/关于簇与托盘保持原样。
 - **重启拉起路径选择（实测结论）**：本机外壳由 `systemd-run --user --unit=dsh-tauri-user` 启动，unit 的 `Restart=no`、`KillMode=control-group`。实测同 cgroup 内在 MainPID 退出后派生的兄弟进程会被 systemd 一并清掉（独立 `dsh-cgroup-probe3` 单元探针：子 sleep 随主进程退出而消失），所以不用 Tauri 2.12.7 的 `app.restart()` / `app.relaunch()`（它们会在旧进程退出前 spawn 到同一 cgroup）。改为由独立 `dsh-tauri-restart-helper` 临时单元运行一段 `sh -c` 助手：轮询旧 PID 消失（上限 10 秒），再用 `systemd-run --user --collect --unit=dsh-tauri-user -- <当前可执行文件>` 起新实例；不改任何系统 unit 配置，不触碰已有实例。无 systemd 用户管理器时回退 `setsid sh -c`。
