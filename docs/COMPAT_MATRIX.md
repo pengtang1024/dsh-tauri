@@ -101,6 +101,60 @@
 
 释放前基线：du = 48G、域列表无 dsh-compat-*、无 qemu 进程；三台 VM 的 qcow2 overlay 均在 .tmp-compat/（不在 /mnt/data/vm），每台测完即 virsh destroy（exit 0）+ virsh undefine --remove-all-storage（exit 0，删除 vda）。释放后：du = 48G（与基线一致）、域列表只剩两个原有且关闭的 VM、无 qemu 进程。
 
+### v0.9.0 — Ubuntu/Debian（deb + AppImage）
+
+> 本节由子 agent vm-deb090 追加，仅覆盖 Ubuntu 24.04 上的 deb 与 AppImage 实测，不改上文其它段落。测试对象：v0.9.0 CI Release 资产（非本地构建）。产物：deb = DSH.Tauri_0.9.0_amd64.deb（3,999,842 B，sha256 `f68a2412b11fbc5c2b1d2b8b6b4f4bbbf7889f43a29fa0f340576d93e6b0aeae`）；AppImage = DSH.Tauri_0.9.0_amd64.AppImage（82,590,200 B，sha256 `40f9f2ef8b23fa96ec0070dc88d45b6dc4663ff5854285b698df85892a51452e`）。两者均由 GitHub Release v0.9.0 经已认证 api.github.com asset 端点下载（github.com 直连超时），大小与官方资产完全一致。环境：VM dsh-compat-ubu090，Ubuntu 24.04.5 LTS（Noble），2 vCPU / 4 GiB / 25 GiB qcow2，NAT，cloud-init seed（NoCloud/xorriso），SSH 免密；VM 内无 X11/Xorg/Xvfb，仅 headless（DISPLAY=、WAYLAND_DISPLAY=）。宿主零 apt/apt-get 包操作，未用 pgrep -f 批量 kill，未动宿主 PID 3524464。
+
+**① deb 安装与依赖闭合（VM dsh-compat-ubu090，IP 192.168.122.56）**
+
+    scp dsh-0.9.0.deb -> /tmp/dsh.deb                    # exit 0；VM 内 sha256 与宿主一致
+    dpkg-deb -f /tmp/dsh.deb Package Version Depends     # exit 0：dsh-tauri / 0.9.0 / amd64
+        # Depends（10 项，含重复）：libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1,
+        #   zenity, wl-clipboard, libnotify-bin, xdg-utils, libappindicator3-1,
+        #   libwebkit2gtk-4.1-0, libgtk-3-0（后两项为重复声明）
+    sudo apt-get update -qq                              # exit 0
+    sudo apt-get install -y -qq /tmp/dsh.deb             # APT_INSTALL_EXIT=0
+    dpkg -l dsh-tauri                                    # exit 0：ii  dsh-tauri  0.9.0  amd64
+    sudo apt-get check                                   # APT_CHECK_EXIT=0（依赖闭合，无破损）
+    ldd /usr/bin/dsh-tauri | grep 'not found'            # 无输出（grep exit 1 = 无缺失）；ldd 共 129 行
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 /usr/bin/dsh-tauri --version  # VERSION_EXIT=101
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 /usr/bin/dsh-tauri            # LAUNCH_EXIT=101
+        # 两者同一错误：tao-0.37.3/event_loop.rs:219 "Failed to initialize gtk backend!"
+        #   （gtk::rt::init / Failed to initialize GTK）→ 无显示后端预期失败，非缺库 bug
+
+  deb 声明依赖就位情况（dpkg-query 实测版本）：libwebkit2gtk-4.1-0 = 2.52.6-0ubuntu0.24.04.2；libayatana-appindicator3-1 = 0.5.93-1build3；zenity = 4.0.1-1build3；wl-clipboard = 2.2.1-1build1；libnotify-bin = 0.8.3-1build2；xdg-utils = 1.1.3-4.1ubuntu3。注意 v0.9.0 相对 v0.7.2 的两处变化：① deb 声明的 `libgtk-3-0` 在 Noble 已更名为 `libgtk-3-0t64`（实测装的是 3.24.41-4ubuntu1.3），apt 仍正确解析并装齐、apt-get check 0，运行库 libgtk-3.so.0 解析到位，不构成破损；② 新增声明 `libappindicator3-1`，Noble/universe 有候选（12.10.1+20.10.20200706.1-0ubuntu5）但本次未被拉入（dpkg 状态 not-installed），apt 依赖树仍判闭合、ldd 无缺失，不影响启动。helper 命令 zenity / wl-copy / wl-paste / notify-send / xdg-open 全部就位；kdialog 缺席（可选增强，GNOME 不需要）。ldd 关键项均解析：libwebkit2gtk-4.1.so.0、libgtk-3.so.0 均指向 /lib/x86_64-linux-gnu/。
+
+**② AppImage 解包、缺库补齐与启动（干净 VM 重建，IP 192.168.122.159，装包前 webkit/gtk 包数 = 0）**
+
+    scp dsh-0.9.0.AppImage -> /tmp/dsh.AppImage          # exit 0
+    chmod +x /tmp/dsh.AppImage                           # exit 0
+    cd /tmp && ./dsh.AppImage --appimage-extract         # EXTRACT_EXIT=0 → /tmp/squashfs-root/usr/bin/dsh-tauri
+    ldd /tmp/squashfs-root/usr/bin/dsh-tauri（干净系统） # LDD_EXIT=0；缺 6 项（见下，awk 'not found' 去重）
+        # libEGL.so.1, libGL.so.1, libX11-xcb.so.1, libgbm.so.1, libharfbuzz.so.0, libwayland-client.so.0
+    DISPLAY= WAYLAND_DISPLAY= timeout 20 /tmp/dsh.AppImage --version  # 补库前 exit 127
+        # stderr: error while loading shared libraries: libwayland-client.so.0
+    sudo apt-get update -qq                              # exit 0
+    sudo apt-get install -y -qq libegl1 libgl1 libx11-xcb1 libgbm1 libharfbuzz0b libwayland-client0 zenity wl-clipboard libnotify-bin xdg-utils   # APPIMAGE_DEPS_INSTALL_EXIT=0
+    ldd /tmp/squashfs-root/usr/bin/dsh-tauri（补库后）   # LDD_EXIT=0；missing_count=0（无 not found）
+    DISPLAY= WAYLAND_DISPLAY= timeout 25 /tmp/dsh.AppImage --version  # POSTINSTALL_LAUNCH_EXIT=101
+        # 同一 tao GTK backend panic（headless 预期失败，已越过动态库加载阶段）
+
+  准确 apt 包名与实测安装版本（Ubuntu 24.04，逐 SONAME 经 apt-cache policy 核对候选）：libEGL.so.1 → `libegl1` 1.7.0-1build1；libGL.so.1 → `libgl1` 1.7.0-1build1；libX11-xcb.so.1 → `libx11-xcb1` 2:1.8.7-1ubuntu0.1；libgbm.so.1 → `libgbm1` 25.2.8-0ubuntu0.24.04.5；libharfbuzz.so.0 → `libharfbuzz0b` 8.3.0-2build2；libwayland-client.so.0 → `libwayland-client0` 1.22.0-2.1build1；helper：`zenity` 4.0.1-1build3 / `wl-clipboard` 2.2.1-1build1 / `libnotify-bin` 0.8.3-1build2 / `xdg-utils` 1.1.3-4.1ubuntu3（补库后 wl-copy/wl-paste/notify-send/xdg-open/zenity 命令全部就位）。layout 统计：ldd 129 行中 bundled=98（AppImage 自带 libwebkit2gtk-4.1.so.0、libgtk-3.so.0 等，指向 squashfs-root/usr/bin/../lib）、system=29（glibc/libgcc、fribidi/fontconfig/wayland-client/X11/xcb/gbm/drm/GL/EGL 等基础库仍依赖系统）、missing=0。较 v0.7.2（最小系统缺 10 项）改善：v0.9.0 已把 WebKit2GTK/GTK3 打进 AppImage，但基础图形/Wayland 运行库仍需在上表中补齐，不是开箱即用。
+
+**③ rpm 在 Ubuntu 上不适用**：Ubuntu 为 dpkg/apt 体系，rpm 包既非本矩阵 Ubuntu 轨道产物也无原生安装路径；不强装、不验证（由 Fedora/RPM 轨道覆盖）。
+
+**④ 资源释放核对（硬要求）**
+
+    释放前：virsh list --all → id 9 dsh-compat-ubu090 运行 + tiny10-live/win11-live（关闭）；du -sh /mnt/data/vm = 48G
+    virsh destroy dsh-compat-ubu090      # exit 0
+    virsh undefine dsh-compat-ubu090 --remove-all-storage  # exit 0（删除卷 vda 与 sda/seed.iso）
+    释放后：virsh list --all → 仅 tiny10-live、win11-live（均关闭），无 dsh-compat-*；du -sh /mnt/data/vm = 48G（与基线一致）；
+            ps -eo pid,comm,args | grep '[q]emu-system' → 无输出（无遗留 qemu 进程）；
+            ps -p 3524464 → dsh-tauri /usr/bin/dsh-tauri（宿主实例全程未动）
+    清理：临时目录 .tmp-vm-ubu090/（镜像、seed ISO、deb/AppImage、SSH 预置、脚本、日志）已 rm -rf；
+          .git/info/exclude 中仅移除本人新增的 .tmp-vm-ubu090/ 行，其它轨道（如 .tmp-vm-fed090/）行保留不动。
+
+
 ## 结论与建议
 
 1. Debian/Ubuntu .deb 路线是唯一完整验证通过的产物路径：装包、依赖闭合、外部助手命令均达标；gtk 启动失败纯粹因 VM 禁止显示后端，不代表 GUI 不可用。建议把「headless 装包/依赖冒烟」固化为 CI 门禁。
