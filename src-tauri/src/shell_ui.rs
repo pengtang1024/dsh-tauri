@@ -204,6 +204,8 @@ struct StatusFacts {
     version: Option<String>,
     auto_update: bool,
     close_to_tray: bool,
+    /// Only DSH_TAURI_PROFILE is read, and only as a string for the panel.
+    profile_source: Option<String>,
     helpers: Vec<(&'static str, bool)>
 }
 
@@ -223,6 +225,7 @@ fn status_facts(app: Option<&AppHandle<Wry>>) -> StatusFacts {
         version,
         auto_update: crate::runtime::auto_update_enabled(),
         close_to_tray: close_to_tray(),
+        profile_source: std::env::var("DSH_TAURI_PROFILE").ok(),
         helpers
     }
 }
@@ -243,15 +246,39 @@ fn close_label(keep_alive: bool) -> &'static str {
     }
 }
 
+/// Pure rendering of the one environment variable that selects the profile.
+/// Only `DSH_TAURI_PROFILE` is ever read (by the caller); no other environment
+/// variable is dumped into the panel. A value with control characters or a
+/// newline can never smuggle a second line into the text view, so it is
+/// rejected and reported as an invalid override.
+fn profile_source_label(raw: Option<&str>) -> String {
+    match raw {
+        Some(value) if !value.is_empty()
+            && value.len() <= 64
+            && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        => format!("{value}（环境变量指定）"),
+        _ => "默认 web".to_owned()
+    }
+}
+
+/// Static, read-only explanation of how the Tauri shell and the official
+/// Electron desktop client share and isolate their data. Pure strings: the
+/// panel never opens a file under the home directory.
+const PROFILE_ISOLATION_FACT: &str = "插件配置按 profile 隔离；官方独占 desktop";
+const PROFILE_ISOLATION_FACT_2: &str = "官方端独占 desktop profile；会话/存储共享";
+const PLUGIN_TROUBLESHOOT_FACT: &str = "插件装进 web profile；桌面端看不到属 profile 隔离";
+const PLUGIN_TROUBLESHOOT_FACT_2: &str = "（属装错 profile，非安装失败）";
+const BRIDGE_WEB_BRANCH_FACT: &str = "按 Web 分支运行，功能表现与官方桌面端不同";
+
 /// Status-panel geometry. The panel keeps one fixed width and every line is
 /// pre-wrapped to `PANEL_COLS` display columns, so the self-drawn GTK text view
 /// (and the legacy zenity fallback) never breaks a value mid-word (the old panel
 /// let a 110-column runtime path wrap across three lines at arbitrary characters).
 const PANEL_COLS: usize = 64;
 const PANEL_WIDTH: i32 = 500;
-const PANEL_HEIGHT: i32 = 420;
-/// Widest label ("运行时来源"); every value therefore starts in one column.
-const LABEL_COLS: usize = 10;
+const PANEL_HEIGHT: i32 = 520;
+/// Widest label ("运行时来源" / "Profile 目录"); every value starts in one column.
+const LABEL_COLS: usize = 12;
 const VALUE_COL: usize = LABEL_COLS + 2;
 
 const BRIDGE_SUMMARY: &str = "SHIM 协议 1；桌面对象未实现";
@@ -354,6 +381,11 @@ fn value_indent() -> String {
     " ".repeat(VALUE_COL)
 }
 
+/// One indented continuation line, fitted to the same budget as a fact value.
+fn value_line(text: &str) -> String {
+    format!("{}{}", value_indent(), fit_value(text, PANEL_COLS.saturating_sub(VALUE_COL)))
+}
+
 /// Pack comma-separated items under one label line, breaking between items so
 /// no item is ever split mid-word. A wrap keeps the comma on the previous line
 /// and indents the continuation one level deeper, so the list still reads as a
@@ -433,8 +465,22 @@ fn about_text(info: &serde_json::Value, facts: &StatusFacts) -> String {
     lines.extend(helper_lines(facts));
     lines.push(fact_line("桥接", BRIDGE_SUMMARY));
     lines.push(format!("{}文档: {BRIDGE_DOC}", value_indent()));
+    lines.push(value_line(BRIDGE_WEB_BRANCH_FACT));
     lines.push(fact_line("主目录", &field("home")));
     lines.push(fact_line("配置", &field("profile")));
+    // Paths are concatenated from the home/profile strings already present in
+    // shell_info; no ~/.dsh log or credential content is ever read into the panel.
+    let home = field("home");
+    let profile = field("profile");
+    lines.push(fact_line("Profile 目录", &format!("{home}/profiles/{profile}")));
+    lines.push(fact_line("插件目录", &format!("{home}/profiles/{profile}/node_modules")));
+    lines.push(fact_line("Profile 来源", &profile_source_label(facts.profile_source.as_deref())));
+    lines.push(fact_line("会话与存储", &format!("与官方桌面端共享 {home}/sessions")));
+    lines.push(value_line(&format!("{home}/storages")));
+    lines.push(fact_line("桌面端隔离", PROFILE_ISOLATION_FACT));
+    lines.push(value_line(PROFILE_ISOLATION_FACT_2));
+    lines.push(fact_line("插件排障", PLUGIN_TROUBLESHOOT_FACT));
+    lines.push(value_line(PLUGIN_TROUBLESHOOT_FACT_2));
     lines.push(fact_line("桌面版本", &field("desktopVersion")));
     lines.join("\n")
 }
@@ -812,7 +858,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, profile_source_label, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -981,6 +1027,7 @@ mod tests {
             version: Some("0.2.2-rc.5".to_owned()),
             auto_update: true,
             close_to_tray: true,
+            profile_source: None,
             helpers: NATIVE_HELPERS
                 .iter()
                 .map(|(name, _)| (*name, *name != "wl-paste" && *name != "kdialog"))
@@ -1012,11 +1059,47 @@ mod tests {
         assert!(text.contains("文档: docs/DESKTOP_BRIDGE.zh.md"));
         assert_eq!(fact_value(&text, "主目录"), Some("/home/pt/.dsh"));
         assert_eq!(fact_value(&text, "配置"), Some("web"));
+        // Profile isolation / plugin directory diagnostics are read-only facts.
+        assert_eq!(fact_value(&text, "Profile 目录"), Some("/home/pt/.dsh/profiles/web"));
+        assert_eq!(fact_value(&text, "插件目录"), Some("/home/pt/.dsh/profiles/web/node_modules"));
+        assert_eq!(fact_value(&text, "Profile 来源"), Some("默认 web"));
+        assert_eq!(fact_value(&text, "会话与存储"), Some("与官方桌面端共享 /home/pt/.dsh/sessions"));
+        assert!(text.contains("/home/pt/.dsh/storages"), "storages path is a continuation line");
+        assert_eq!(fact_value(&text, "桌面端隔离"), Some("插件配置按 profile 隔离；官方独占 desktop"));
+        assert_eq!(fact_value(&text, "插件排障"), Some("插件装进 web profile；桌面端看不到属 profile 隔离"));
+        assert!(text.contains("按 Web 分支运行，功能表现与官方桌面端不同"), "bridge note explains the Web branch");
+        assert!(text.contains("（属装错 profile，非安装失败）"), "troubleshooting conclusion survives");
+        assert!(text.contains("官方端独占 desktop profile；会话/存储共享"), "isolation continuation keeps the desktop profile detail");
         assert_eq!(fact_value(&text, "桌面版本"), Some("0.5.0"));
         assert!(text.lines().last().unwrap_or_default().starts_with("桌面版本"), "version closes the panel: {text:?}");
         // shell_info may carry JSON nulls; the panel must stay readable.
         let empty = about_text(&serde_json::json!({ "runtime": null, "home": "", "profile": null, "desktopVersion": null }), &facts());
-        assert_eq!(empty.matches("未设置").count(), 5, "null/empty shell_info fields fall back (version shown twice)");
+        assert_eq!(empty.matches("未设置").count(), 11, "null/empty fields fall back across all path facts (version shown twice)");
+    }
+
+    #[test]
+    fn profile_source_label_only_reflects_the_single_dshtauri_profile_variable() {
+        assert_eq!(profile_source_label(None), "默认 web");
+        assert_eq!(profile_source_label(Some("")), "默认 web");
+        assert_eq!(profile_source_label(Some("desktop")), "desktop（环境变量指定）");
+        assert_eq!(profile_source_label(Some("custom-1")), "custom-1（环境变量指定）");
+        // A hostile value cannot inject a newline or a second "label: value" line.
+        assert_eq!(profile_source_label(Some("web\n凭据")), "默认 web");
+        assert_eq!(profile_source_label(Some("a b")), "默认 web");
+        assert_eq!(profile_source_label(Some(&"x".repeat(65))), "默认 web");
+        // The panel reads exactly one env var, never a bulk dump.
+        let source = menu_source();
+        let block = source
+            .split("fn profile_source_label")
+            .nth(1)
+            .and_then(|tail| tail.split("\n}\n").next())
+            .expect("profile_source_label must exist");
+        assert!(!block.contains("std::env"), "the pure helper reads no environment itself");
+        assert_eq!(
+            source.matches("std::env::var(\"DSH_TAURI_PROFILE\")").count(),
+            1,
+            "only dsh.rs reads the profile var; shell_ui reads it once in status_facts"
+        );
     }
 
     #[test]
@@ -1042,10 +1125,18 @@ mod tests {
             1,
             "the runtime path must stay on one line, never wrap"
         );
+        // New profile/plugin/session paths must be tail-elided on one line,
+        // never folded into a second line by the GTK text view.
         assert_eq!(
-            text.lines().filter(|line| line.contains(".tmp-profile")).count(),
-            1,
-            "the home path must stay on one line too"
+            text.lines().filter(|line| line.contains("profiles/")).count(),
+            2,
+            "profile and plugin directory lines each stay on one line"
+        );
+        assert!(text.lines().any(|line| line.starts_with("Profile 目录") && line.contains("…/")),
+            "a long profile path is elided from the head, keeping its tail"
+        );
+        assert!(text.lines().all(|line| display_cols(line) <= PANEL_COLS),
+            "every isolation line obeys the 64-column budget"
         );
     }
 
@@ -1077,12 +1168,12 @@ mod tests {
             .lines()
             .filter(|line| !line.starts_with(' ') && line.contains(": "))
             .collect();
-        assert_eq!(fact_lines.len(), 10, "ten labelled facts (title and continuations excluded)");
+        assert_eq!(fact_lines.len(), 16, "sixteen labelled facts (title and continuations excluded)");
         for line in fact_lines.iter().skip(1) {
             let colon = line.find(": ").unwrap_or_else(|| panic!("label missing colon: {line:?}"));
             assert_eq!(display_cols(&line[..colon]), LABEL_COLS, "labels share one column: {line:?}");
         }
-        assert_eq!(fact_line("配置", "web"), "配置      : web", "labels are padded, not ragged");
+        assert_eq!(fact_line("配置", "web"), "配置        : web", "labels are padded, not ragged");
     }
 
     #[test]
@@ -1105,6 +1196,7 @@ mod tests {
             version: None,
             auto_update: false,
             close_to_tray: false,
+            profile_source: None,
             helpers: vec![]
         };
         let text = about_text(&serde_json::Value::Null, &empty_facts);

@@ -1,5 +1,11 @@
 # 更新记录
 
+## 未发布
+
+- **改进：运行状态面板显示 profile 隔离与插件目录便于排查装错 profile**：在「关于 dsh-tauri」面板新增 Profile 目录、插件目录、Profile 来源、会话与存储、桌面端隔离、插件排障六个只读字段，并补一句桥接说明「按 Web 分支运行，功能表现与官方桌面端不同」。全部字段走既有 `fact_line` / `elide` 64 列预算（标签列扩为 12 列、面板高度 420→520），长路径尾部省略不折行；Profile 来源只读单个 `DSH_TAURI_PROFILE` 环境变量（纯函数 `profile_source_label`，设置显示值+"（环境变量指定）"，否则"默认 web"），绝不 dump 全部环境变量、绝不读取 `~/.dsh` 下日志或凭据内容进面板；会话/存储共享说明为静态文案。新增 1 项 Rust 单测（纯函数与字段完整性），并扩展既有面板格式与 64 列预算断言，Rust 单测总数 217；`check:docs` 19/0、`cargo test` 217 passed 实测全绿。
+
+---
+
 ## 0.9.1（2026-11-28）
 
 - **文档：v0.9.0 三种安装包 × 四大发行版 KVM 实测兼容矩阵**：基于已发布的 v0.9.0（产物均取自 GitHub Release，非本地构建），在 KVM 虚机中实测 deb / AppImage / rpm 三种格式在 Ubuntu 24.04、Fedora 42、Arch Linux、openSUSE Leap 15.6 上的依赖闭合与启动表现，分三个提交追加到 `docs/COMPAT_MATRIX.md`：Ubuntu 24.04 的 deb/AppImage（依赖解析、ldd 无缺失、AppImage 补库清单与 bundled/system 统计）；Fedora 42 的 rpm/AppImage（`dnf install` 事务完成、`libayatana-appindicator3` 缺失结论已被 appindicator 变体消除、ldd 无 not found）；Arch 与 openSUSE 的 AppImage（Arch 滚动 WebKit 2.54.3 与自带 2.52.6 差异、openSUSE `zypper` rpm 事务与 `--no-gpg-checks` 要求）。headless 无显示后端下的 GTK backend panic 属预期，不构成缺库。全程 VM 内禁 X11、宿主零 apt/apt-get 包操作，未触碰用户实例 PID 3524464；本版无代码变更，完整命令、退出码、依赖版本与结论见 `docs/COMPAT_MATRIX.md`。
@@ -123,7 +129,7 @@
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 216 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门、kdialog 参数与可操作错误提示
+- **Rust 单测扩容**：从 17 个增至 217 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门、kdialog 参数与可操作错误提示
 - **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策
