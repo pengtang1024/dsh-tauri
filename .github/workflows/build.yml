@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
-            libayatana-appindicator3-dev patchelf build-essential
+            libappindicator3-dev patchelf build-essential
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -76,8 +76,12 @@ jobs:
       - name: Lint Rust shell
         run: npm run lint:rust
 
-      - name: Build the .deb and AppImage bundles
-        run: npx tauri build --bundles deb,appimage
+      - name: Build the .deb, AppImage and rpm bundles
+        run: npx tauri build --bundles deb,appimage,rpm
+        env:
+          # rpm Requires must resolve to libappindicator3.so.1 ( Fedora / RHEL )
+          # instead of the ayatana SONAME that Fedora does not ship.
+          TAURI_LINUX_AYATANA_APPINDICATOR: "0"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -86,6 +90,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
 
       - name: Attach the bundles to the release
@@ -95,4 +100,5 @@ jobs:
           files: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/rpm/*.rpm
           generate_release_notes: true

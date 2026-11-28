@@ -17,7 +17,8 @@
     "active": true,
     "targets": [
       "deb",
-      "appimage"
+      "appimage",
+      "rpm"
     ],
     "category": "DeveloperTool",
     "shortDescription": "Tauri shell for DeepSeek Harness Desktop",
