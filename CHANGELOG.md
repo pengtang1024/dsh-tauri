@@ -1,5 +1,14 @@
 # 更新记录
 
+## 未发布
+
+- **新增：菜单「DSH → 重启以应用更新」**：后台更新只 notify「重启生效」但此前没有一键重启手段。新菜单项在 `handle_menu_event` 里按固定顺序先保存窗口状态、调 `supervisor::shutdown()` 优雅回收 Node 子进程、释放单实例 socket，再拉起新进程并 `app.exit(0)`；顺序由纯函数 `restart_steps()` 与静态守卫测试锁定，devtools/重新加载/关于簇与托盘保持原样。
+- **重启拉起路径选择（实测结论）**：本机外壳由 `systemd-run --user --unit=dsh-tauri-user` 启动，unit 的 `Restart=no`、`KillMode=control-group`。实测同 cgroup 内在 MainPID 退出后派生的兄弟进程会被 systemd 一并清掉（独立 `dsh-cgroup-probe3` 单元探针：子 sleep 随主进程退出而消失），所以不用 Tauri 2.12.7 的 `app.restart()` / `app.relaunch()`（它们会在旧进程退出前 spawn 到同一 cgroup）。改为由独立 `dsh-tauri-restart-helper` 临时单元运行一段 `sh -c` 助手：轮询旧 PID 消失（上限 10 秒），再用 `systemd-run --user --collect --unit=dsh-tauri-user -- <当前可执行文件>` 起新实例；不改任何系统 unit 配置，不触碰已有实例。无 systemd 用户管理器时回退 `setsid sh -c`。
+- Rust 单测新增 3 项（菜单静态守卫、关停顺序纯函数与 handler 静态守卫、助手脚本 wait-then-start 守卫）并更新 accelerator 计数断言，总数 220；`check:docs` 19/0。
+- **修复：登录入口完全不可用（window.open 静默返回 null）**：WebKitGTK 下 `window.open("about:blank","_blank")` 静默返回 null、不产生新窗口，官方 `settings-account` 的 `browser-login.ts` 正是靠这个 popup 的 `location.replace(授权URL)` 打开授权页，导致登录按钮无任何反应（原实测：DOM title=LOGINTEST-OPEN_NULL + HTTP beacon 无 /auth.html + 窗口枚举无 popup 三方互证）。修法在 `native.rs::SHIM` 追加 monkeypatch：只拦 `about:blank` + `_blank` 这一精确形态，返回一个 stub popup（`opener` 可写、`closed=false`、`close()`、`location.replace(url)`），`replace` 收到的授权 URL 转调 SHIM 已暴露的 `__DSH_TAURI__.openExternal(url)`（native.rs `open_external`，只接受 https/http/mailto，capability `allow-open-external` 已在位）；其它 `window.open` 形态保持原生行为（仍返回 null，不变）。**绝不注入 dshDesktop、绝不设 document.documentElement.dataset.platform**（DESKTOP_BRIDGE §5 硬决策，会翻转登录到无接线的 desktop 分支）。新增 1 项 Rust 字符串守卫 + 3 项 npm SHIM 行为测试（stub 非 null / opener 可清 / replace 转调 open_external / 其它形态走原生 / 无 dshDesktop 与 data-platform），Rust 单测总数 221、npm 单测 31 项、SHIM 契约断言 35 项。
+
+---
+
 ## 0.10.0（2026-11-28）
 
 - **改进：运行状态面板显示 profile 隔离与插件目录便于排查装错 profile**：在「关于 dsh-tauri」面板新增 Profile 目录、插件目录、Profile 来源、会话与存储、桌面端隔离、插件排障六个只读字段，并补一句桥接说明「按 Web 分支运行，功能表现与官方桌面端不同」。全部字段走既有 `fact_line` / `elide` 64 列预算（标签列扩为 12 列、面板高度 420→520），长路径尾部省略不折行；Profile 来源只读单个 `DSH_TAURI_PROFILE` 环境变量（纯函数 `profile_source_label`，设置显示值+"（环境变量指定）"，否则"默认 web"），绝不 dump 全部环境变量、绝不读取 `~/.dsh` 下日志或凭据内容进面板；会话/存储共享说明为静态文案。新增 1 项 Rust 单测（纯函数与字段完整性），并扩展既有面板格式与 64 列预算断言，Rust 单测总数 217；`check:docs` 19/0、`cargo test` 217 passed 实测全绿。
@@ -125,12 +134,12 @@
 
 **测试与质量**
 
-- **测试整理**：删除失效的 shell-api 测试，新增 SHIM 契约单测（21 项断言）与 probe-cli 失败路径测试
+- **测试整理**：删除失效的 shell-api 测试，新增 SHIM 契约单测（35 项断言）与 probe-cli 失败路径测试
 - **契约漂移守卫**：新增上游桥接契约静态检查（13 项，含 SHIM 双窗口注入点、withGlobalTauri 与 dshDesktop 不实现检查）并接入 CI
 - **文档测试数守卫**：校验文档声明的测试数与 Rust/npm 实际单测数一致
 - **探针健壮性**：补上探针超时与信号清理
-- **Rust 单测扩容**：从 17 个增至 217 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门、kdialog 参数与可操作错误提示
-- **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 28 项（含重定向门禁 2 项）
+- **Rust 单测扩容**：从 17 个增至 221 个，覆盖 swap 原子替换、runtime 查找、banner loopback、native 外链与取消、通知参数、剪贴板退出状态、exec 并发与 RAII、single_instance 抢占与启动期 focus、DSH host 校验、update 版本解析与 shell_ui 原子写与启动期菜单、supervisor 优雅退出、install npm 安装参数、关停后拒绝新 spawn 的 can_spawn 门、kdialog 参数与可操作错误提示
+- **错误页与启动页单测**：新增 node:vm 单测（错误页 6 项、启动页 10 项），npm 单测总数达 31 项（含重定向门禁 2 项）
 - **文档契约数守卫**：文档门禁扩展为同时校验 README 与 CHANGELOG 声明的契约守卫检查项数，过期值即 FAIL
 - **dshDesktop 注入守卫**：契约守卫新增禁止外壳注入 dshDesktop 全局的检查，落实「明确不实现」决策
 - **clippy 警告归零**：清理 clippy 警告并把 lint 加入全量门禁，警告不再被忽略

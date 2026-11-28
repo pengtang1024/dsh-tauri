@@ -16,8 +16,15 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 /// exists and need no extra frontend capability.
 const SUPPORT_ID: &str = "support";
 const ABOUT_ID: &str = "about";
+const RESTART_ID: &str = "restart";
 const DSH_MENU_LABEL: &str = "DSH";
 const SUPPORT_ITEM_LABEL: &str = "支持项目 ⭐";
+/// Label chosen over 「重启应用」: the entry exists to apply a background
+/// runtime update, so the reason is visible right in the menu.
+const RESTART_ITEM_LABEL: &str = "重启以应用更新";
+/// Unit name used by the installed shell (`systemd-run --user --unit=dsh-tauri-user`).
+/// The helper starts the replacement under the same name once the old PID is gone.
+const RESTART_UNIT: &str = "dsh-tauri-user";
 const SUPPORT_URL: &str = "https://github.com/pengtang1024/dsh-tauri";
 
 /// Window geometry remembered across launches.
@@ -128,6 +135,8 @@ fn close_to_tray() -> bool {
 ///   in release too, so no debug-only cfg, no env gate, no disabled state.
 /// - 关于 dsh-tauri: shows this shell's own shell_info (runtime / home /
 ///   profile / desktopVersion), answering "which runtime am I running".
+/// - 重启以应用更新: cleanly exits and starts a fresh shell so an installed
+///   runtime update takes effect without a manual `systemctl --user restart`.
 /// - 支持项目 ⭐ lives inside the about submenu, not as a top-level column and
 ///   not in the tray.
 ///
@@ -137,12 +146,13 @@ fn close_to_tray() -> bool {
 pub fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let reload = MenuItem::with_id(app, "reload", "重新加载", true, None::<&str>)?;
     let devtools = MenuItem::with_id(app, "devtools", "开发者工具", true, None::<&str>)?;
+    let restart = MenuItem::with_id(app, RESTART_ID, RESTART_ITEM_LABEL, true, None::<&str>)?;
     let about = MenuItem::with_id(app, ABOUT_ID, "关于 dsh-tauri", true, None::<&str>)?;
     let support = MenuItem::with_id(app, SUPPORT_ID, SUPPORT_ITEM_LABEL, true, None::<&str>)?;
     // The star sits inside the about cluster, never as a top-level column.
     let about_cluster = Submenu::with_items(app, "关于", true, &[&about, &support])?;
     // Exactly one top-level column: everything the shell owns lives under DSH.
-    let dsh = Submenu::with_items(app, DSH_MENU_LABEL, true, &[&reload, &devtools, &about_cluster])?;
+    let dsh = Submenu::with_items(app, DSH_MENU_LABEL, true, &[&reload, &devtools, &restart, &about_cluster])?;
 
     Menu::with_items(app, &[&dsh])
 }
@@ -545,6 +555,92 @@ fn menu_window_label(main_exists: bool) -> &'static str {
     if main_exists { "main" } else { "splash" }
 }
 
+/// Steps of a clean restart, in their mandatory order. Pure so the sequence
+/// can be asserted without a live AppHandle: geometry must be persisted first,
+/// the supervisor must be told to reap the Node child second, and only then may
+/// the old shell hand over to a fresh process. Skipping `Shutdown` is the bug
+/// this guard exists to prevent — a restart that leaves the old Node Host alive
+/// would hold the profile and the port against the new instance.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestartStep {
+    SaveWindowState,
+    ShutdownSupervisor,
+    ReleaseInstanceSocket,
+    SpawnReplacement,
+    ExitOldShell,
+}
+
+#[cfg(test)]
+fn restart_steps() -> &'static [RestartStep] {
+    &[
+        RestartStep::SaveWindowState,
+        RestartStep::ShutdownSupervisor,
+        RestartStep::ReleaseInstanceSocket,
+        RestartStep::SpawnReplacement,
+        RestartStep::ExitOldShell,
+    ]
+}
+
+/// Build the detached helper script that starts a fresh shell unit after this
+/// process is gone. Pure: given the old pid and the binary path, the literal
+/// script is fully determined, so the wait-then-start ordering is testable.
+///
+/// Why not `app.restart()` / `app.relaunch()`? Tauri 2.12.7 spawns the new
+/// process *before* the old one exits, into the same systemd cgroup. This shell
+/// is launched by `systemd-run --user --unit=dsh-tauri-user` with the default
+/// `KillMode=control-group`: when the old MainPID exits, systemd tears down the
+/// whole cgroup, killing the freshly spawned replacement. A transient unit with
+/// `Restart=no` also will not bring it back. The helper runs in its own unit,
+/// polls for the old PID to disappear (bounded by a 10-second watchdog), then
+/// starts the same unit name via `systemd-run --user --collect --unit=…` — a
+/// clean handover with no unit-file edits and no lingering orphan.
+fn restart_helper_script(old_pid: u32, binary: &str) -> String {
+    format!(
+        "#!/bin/sh\nfor i in $(seq 1 100); do\n  kill -0 {old_pid} 2>/dev/null || break\n  sleep 0.1\ndone\nexec systemd-run --user --collect --unit={unit} -- {binary}\n",
+        unit = RESTART_UNIT
+    )
+}
+
+/// Start the detached replacement helper. Backed by `systemd-run --user` when
+/// available (the installed shell's own launch path); a plain `setsid sh` spawn
+/// is the fallback for sessions without a user manager, so the menu still works
+/// outside systemd. The script is passed via `sh -c` from stdin-free argv, so
+/// no executable permission or temp script file is needed.
+fn spawn_replacement(app: &AppHandle<Wry>) -> bool {
+    let binary = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[dsh-tauri] 无法定位当前可执行文件，取消重启：{error}");
+            return false;
+        }
+    };
+    let script = restart_helper_script(std::process::id(), &binary.to_string_lossy());
+    // Keep the script entirely in argv: no file to clean up, no world-readable
+    // residue. NO `--wait`: the helper waits for THIS pid to exit, so waiting
+    // here would deadlock the menu thread. `--collect` reaps the helper unit
+    // once it hands over. `systemd-run` itself returns as soon as the helper
+    // unit is queued, which is enough to know the relaunch is armed.
+    let launched = Command::new("systemd-run")
+        .args(["--user", "--collect", "--unit=dsh-tauri-restart-helper", "sh", "-c"])
+        .arg(&script)
+        .spawn()
+        .map(|mut child| child.wait().map(|_| ()).is_ok())
+        .unwrap_or(false);
+    if !launched {
+        let fallback = Command::new("setsid").arg("sh").arg("-c").arg(&script).spawn();
+        if let Err(error) = fallback {
+            eprintln!("[dsh-tauri] 无法启动重启助手，取消重启：{error}");
+            return false;
+        }
+    }
+    // Under systemd the helper owns the handover. app.exit(0) is safe here:
+    // the helper waits for this PID to vanish before it claims the socket, and
+    // supervisor::shutdown() is a one-shot gate (RunEvent::Exit calls it again).
+    let _ = app;
+    true
+}
+
 /// Wire menu actions; unknown ids are ignored. Reload/devtools target the
 /// owning window (main once it exists, otherwise the boot splash); about and
 /// support are plain Rust helpers that work even before a window exists.
@@ -557,6 +653,21 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
     }
     if id == ABOUT_ID {
         show_about(app);
+        return;
+    }
+    if id == RESTART_ID {
+        // Order is contract, not convenience: persist geometry and reap the
+        // Node child before the old process releases the socket or exits.
+        let label = menu_window_label(app.get_webview_window("main").is_some());
+        if let Some(window) = app.get_webview_window(label) {
+            save_window_state(&window);
+        }
+        crate::supervisor::shutdown();
+        // The helper waits for this PID to disappear before it claims the
+        // socket again; app.exit(0) below releases it and reaps the child.
+        if spawn_replacement(app) {
+            app.exit(0);
+        }
         return;
     }
     // Remaining known ids are window actions; unknown ids are ignored.
@@ -858,7 +969,7 @@ fn urlencoding(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, profile_source_label, resized_event_is_noop, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS};
+    use super::{about_text, auto_update_label, clamp_to_screen, close_label, decode_state, display_cols, display_version, elide_head, elide_tail, encode_state, fact_line, geometry_is_sane, helper_in_path, helper_lines, menu_window_label, navigate_error_message, profile_source_label, resized_event_is_noop, restart_helper_script, restart_steps, show_url_failed_message, urlencoding, StatusFacts, WindowState, ABOUT_ID, DSH_MENU_LABEL, LABEL_COLS, PANEL_COLS, RESTART_ID, RESTART_ITEM_LABEL, RESTART_UNIT, SUPPORT_ID, SUPPORT_ITEM_LABEL, SUPPORT_URL, NATIVE_HELPERS, RestartStep};
 
     // Static guards over the menu source: these are the pure, testable parts of
     // the native menu layout (the actual widgets require a live AppHandle).
@@ -969,6 +1080,99 @@ mod tests {
     }
 
     #[test]
+    fn restart_item_exists_in_the_single_dsh_column_with_stable_id() {
+        let menu = build_menu_source();
+        let column = menu
+            .split("Submenu::with_items(app, DSH_MENU_LABEL")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("DSH submenu must exist");
+        assert!(column.contains("&restart"), "DSH column must reference the restart item");
+        assert_eq!(RESTART_ID, "restart", "menu id must match the handler literal");
+        assert_eq!(RESTART_ITEM_LABEL, "重启以应用更新");
+        assert_eq!(menu.matches("MenuItem::with_id(app, RESTART_ID, RESTART_ITEM_LABEL").count(), 1,
+            "restart item must be created exactly once");
+        // Relaunch is a last-resort path, not a duplicate reload button: the
+        // original reload/devtools/about cluster stays intact.
+        for binding in ["&reload", "&devtools", "&about_cluster"] {
+            assert!(column.contains(binding), "existing DSH binding {binding} must stay");
+        }
+        assert!(!menu.contains("全屏") && !menu.contains("set_fullscreen"), "no fullscreen item");
+    }
+
+    #[test]
+    fn restart_runs_in_save_shutdown_then_spawn_order() {
+        // The enum is the single source of truth for the mandatory order.
+        assert_eq!(
+            restart_steps(),
+            &[
+                RestartStep::SaveWindowState,
+                RestartStep::ShutdownSupervisor,
+                RestartStep::ReleaseInstanceSocket,
+                RestartStep::SpawnReplacement,
+                RestartStep::ExitOldShell,
+            ]
+        );
+        // Static guard on the real handler: the calls must appear in that
+        // order, and supervisor::shutdown() must not be omitted.
+        let source = menu_source();
+        // Split at the invocation, not the doc comment, so explanatory text
+        // mentioning `shutdown()` cannot shift the computed positions.
+        let handler = source
+            .split("if id == RESTART_ID {")
+            .nth(1)
+            .and_then(|tail| tail.split("\n    // Remaining known ids").next())
+            .expect("restart handler must exist");
+        for (needle, why) in [
+            ("save_window_state(&window)", "geometry must be persisted first"),
+            ("crate::supervisor::shutdown()", "Node child must be reaped second"),
+            ("spawn_replacement(app)", "replacement must be armed third"),
+            ("app.exit(0)", "old shell exits last"),
+        ] {
+            assert!(handler.contains(needle), "{why}");
+        }
+        let code = handler
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let save = code.find("save_window_state(&window)").expect("save");
+        let shutdown = code.find("crate::supervisor::shutdown()").expect("shutdown");
+        let spawn = code.find("spawn_replacement(app)").expect("spawn");
+        let exit = code.find("app.exit(0)").expect("exit");
+        assert!(save < shutdown && shutdown < spawn && spawn < exit, "restart order: {code:?}");
+        assert_eq!(code.matches("crate::supervisor::shutdown()").count(), 1,
+            "shutdown must be called exactly once in the handler");
+    }
+
+    #[test]
+    fn restart_helper_waits_for_old_pid_before_starting_replacement() {
+        let script = restart_helper_script(4242, "/usr/bin/dsh-tauri");
+        assert!(script.starts_with("#!/bin/sh"), "helper must be a shell script");
+        let kill = script.find("kill -0 4242").expect("helper must wait for old PID");
+        let run = script.find("systemd-run --user --collect --unit=dsh-tauri-user").expect("helper must start the installed unit");
+        assert!(kill < run, "wait must happen before the new instance is started");
+        assert!(script.contains("sleep 0.1"), "wait must be bounded, not a busy loop");
+        assert!(script.contains("seq 1 100"), "wait must have a 10-second watchdog");
+        assert!(script.contains("-- /usr/bin/dsh-tauri"), "helper must exec the current binary");
+        assert_eq!(RESTART_UNIT, "dsh-tauri-user", "unit must match the installed shell unit");
+        // Do not use Tauri's in-process restart under systemd: it spawns into
+        // the dying cgroup and the replacement is killed with the old MainPID.
+        // Only the explanatory comment mentions these APIs; executable code
+        let source = menu_source();
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("test module marker must exist");
+        let executable = production
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("///") && !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!executable.contains("app.restart()"), "in-process restart is unsafe here");
+        assert!(!executable.contains("app.relaunch()"), "in-process relaunch is unsafe here");
+    }
+    #[test]
     fn devtools_is_always_visible_and_enabled() {
         let menu = build_menu_source();
         // The devtools MenuItem is created with enabled = true, no cfg gate and
@@ -1017,7 +1221,7 @@ mod tests {
         // fullscreen, which is deliberately not a menu item here.
         assert!(!menu.contains("Some(\"Cmd"), "command-style shortcut hints must be gone");
         assert!(!menu.contains("F11"), "F11 hint must be gone");
-        assert_eq!(menu.matches("None::<&str>").count(), 4, "reload/devtools/about/support are accelerator-free");
+        assert_eq!(menu.matches("None::<&str>").count(), 5, "reload/devtools/restart/about/support are accelerator-free");
     }
 
     fn facts() -> StatusFacts {

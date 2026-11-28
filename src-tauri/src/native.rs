@@ -367,6 +367,30 @@ pub const SHIM: &str = r#"
   globalThis.__DSH_DIRECTORY_PICKER__ = {
     pick: (options) => call('pick_directory', { title: options && options.title })
   };
+  // WebKitGTK silently returns null for window.open('about:blank', '_blank'),
+  // the exact shape the upstream account UI uses to preopen its authorization
+  // tab (dsh-client-ui-settings-account browser-login.ts). Patch only that
+  // shape: return a stub popup whose deferred location.replace(url) goes
+  // through the existing native openExternal bridge. Every other window.open
+  // call keeps the original native behavior, null included.
+  const nativeOpen = typeof globalThis.open === 'function' ? globalThis.open : null;
+  globalThis.open = function (...args) {
+    if (args[0] === 'about:blank' && args[1] === '_blank') {
+      return {
+        opener: globalThis,
+        closed: false,
+        close() { this.closed = true; },
+        location: {
+          replace(url) {
+            const bridge = globalThis.__DSH_TAURI__;
+            if (bridge && typeof bridge.openExternal === 'function') return bridge.openExternal(url);
+            return Promise.reject(new Error('Tauri bridge unavailable'));
+          }
+        }
+      };
+    }
+    return nativeOpen ? nativeOpen.apply(globalThis, args) : null;
+  };
   // WebKit keeps document.title to itself; mirror it into the native title bar.
   let last = '';
   const syncTitle = () => {
@@ -483,7 +507,7 @@ mod tests {
         external_url_allowed, kdialog_args, menu_fallback_injection, menu_surface_fallback_css,
         menu_surface_fallback_script, no_picker_error, notify_args, picked_path, status_message,
         title_window_label, write_error_message, HelperOutcome, MENU_SURFACE_CSS_PLACEHOLDER,
-        MENU_SURFACE_FALLBACK_SCRIPT,
+        MENU_SURFACE_FALLBACK_SCRIPT, SHIM,
     };
 
     #[test]
@@ -835,5 +859,27 @@ mod tests {
         // Escaped newlines keep the literal on one line: the injected script
         // gains no structure from the stylesheet, whatever it contains.
         assert_eq!(script.lines().count(), MENU_SURFACE_FALLBACK_SCRIPT.lines().count());
+    }
+
+    /// Login popup fix: the SHIM must intercept only the exact upstream shape
+    /// window.open('about:blank', '_blank') and return a stub popup whose
+    /// deferred location.replace routes to the native openExternal bridge.
+    #[test]
+    fn shim_patches_only_about_blank_blank_popup_and_routes_to_open_external() {
+        for needle in [
+            "globalThis.open = function (...args)",
+            "args[0] === 'about:blank' && args[1] === '_blank'",
+            "closed: false",
+            "close() { this.closed = true; }",
+            "replace(url)",
+            "bridge.openExternal(url)",
+            "nativeOpen.apply(globalThis, args)",
+        ] {
+            assert!(SHIM.contains(needle), "missing SHIM popup contract: {needle}");
+        }
+        // The desktop bridge hard-decision: never flip the login path onto the
+        // unwired dshDesktop branch, never set a data-platform attribute.
+        assert!(!SHIM.contains("dshDesktop"), "SHIM must not inject dshDesktop");
+        assert!(!SHIM.contains("data-platform"), "SHIM must not set data-platform");
     }
 }

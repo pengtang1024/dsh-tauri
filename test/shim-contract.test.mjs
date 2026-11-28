@@ -17,7 +17,7 @@ const shim = shimMatch[1];
  * Execute the injected shim in an isolated realm with fake native/dom hosts.
  * Every core.invoke call is recorded synchronously for exact-contract checks.
  */
-function loadShim({ withBridge = true, title = '', readyState = 'complete' } = {}) {
+function loadShim({ withBridge = true, title = '', readyState = 'complete', nativeOpen } = {}) {
   const calls = [];
   const listeners = {};
   const head = { tagName: 'HEAD' };
@@ -42,9 +42,14 @@ function loadShim({ withBridge = true, title = '', readyState = 'complete' } = {
       this.options = { ...options };
     }
   }
+  const nativeOpenCalls = [];
   const sandbox = {
     document,
-    MutationObserver: FakeMutationObserver
+    MutationObserver: FakeMutationObserver,
+    open: (...args) => {
+      nativeOpenCalls.push(args);
+      return nativeOpen === undefined ? null : nativeOpen(...args);
+    }
   };
   if (withBridge) {
     sandbox.__TAURI__ = {
@@ -59,7 +64,7 @@ function loadShim({ withBridge = true, title = '', readyState = 'complete' } = {
     };
   }
   vm.runInContext(shim, vm.createContext(sandbox));
-  return { sandbox, document, calls, listeners, observer, head, documentElement };
+  return { sandbox, document, calls, listeners, observer, head, documentElement, nativeOpenCalls };
 }
 
 test('injects __DSH_TAURI__ v1 and routes all APIs through core.invoke', async () => {
@@ -136,4 +141,48 @@ test('API calls reject when the Tauri bridge is missing', async () => {
 
   await assert.rejects(sandbox.__DSH_TAURI__.openExternal('https://example.com'), /Tauri bridge unavailable/);
   await assert.rejects(sandbox.__DSH_DIRECTORY_PICKER__.pick({ title: 'x' }), /Tauri bridge unavailable/);
+});
+
+test('login popup: about:blank + _blank returns a stub and replace routes to open_external', async () => {
+  const { sandbox, calls, nativeOpenCalls } = loadShim();
+
+  // Exact upstream shape from dsh-client-ui-settings-account browser-login.ts:
+  // window.open('about:blank', '_blank'); popup.opener = null;
+  // popup.location.replace(destination).
+  const popup = sandbox.open('about:blank', '_blank');
+  assert.ok(popup, 'the shim must return a non-null stub popup');
+  assert.equal(popup.closed, false);
+  popup.opener = null;
+  assert.equal(popup.opener, null, 'opener must be writable and clearable');
+
+  await popup.location.replace('https://auth.example.com/auth.html?theme=dark');
+  assert.deepEqual(calls, [
+    { command: 'open_external', args: { url: 'https://auth.example.com/auth.html?theme=dark' } }
+  ]);
+  assert.deepEqual(nativeOpenCalls, [], 'the intercepted shape must not call the native open');
+
+  popup.close();
+  assert.equal(popup.closed, true, 'close() must flip closed to true');
+});
+
+test('login popup: other window.open shapes keep native behavior', () => {
+  const sentinel = { tag: 'native-window' };
+  const { sandbox, calls, nativeOpenCalls } = loadShim({ nativeOpen: () => sentinel });
+
+  assert.equal(sandbox.open('https://example.com', '_blank'), sentinel);
+  assert.equal(sandbox.open('about:blank', '_self'), sentinel);
+  assert.equal(sandbox.open('about:blank'), sentinel);
+  assert.deepEqual(nativeOpenCalls, [
+    ['https://example.com', '_blank'],
+    ['about:blank', '_self'],
+    ['about:blank']
+  ]);
+  assert.deepEqual(calls, [], 'non-login shapes must never invoke open_external');
+});
+
+test('login popup: no dshDesktop global and no data-platform write in SHIM', () => {
+  const { sandbox } = loadShim();
+  assert.equal(sandbox.dshDesktop, undefined, 'SHIM must not inject dshDesktop');
+  assert.ok(!shim.includes('dshDesktop'), 'SHIM source must not mention dshDesktop');
+  assert.ok(!shim.includes('data-platform'), 'SHIM source must not set data-platform');
 });

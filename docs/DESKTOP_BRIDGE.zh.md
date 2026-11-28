@@ -58,7 +58,7 @@ grep -rho 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' \
 - 守卫：`tools/check-capabilities.mjs`（`npm run check:capabilities`）现在断言「SHIM/启动页调用的每个命令都被放行」「引用的应用权限存在」「有 External 窗口就必须声明 `remote.urls` 且覆盖默认回环主机」「URL pattern 不含方括号（urlpattern 会在 `generate_context!` 里 panic）」「`local` 未被关闭」。
 运行状态面板佐证：`src-tauri/src/shell_ui.rs` 的 `about_text` 在「关于 dsh-tauri」中展示 `shell_info` 四字段、SHIM 协议版本 1，以及「未实现上游桌面对象」的文字说明；**只做文字说明，既不设置 `data-platform`，也不注入 `dshDesktop`**（见第 5 节决策）。
 
-补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；它现在还校验 token URL 返回的 303 `Location` 必须仍在本地 origin（`redirectIsLocal`，缺失/外部 origin 即 FAIL 且不回显目标），防止 WebView 被导向外部站点后注入原生能力；对应 npm 单测 28 项（含重定向门禁 2 项）。与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
+补充：`package.json:8` 的 test 脚本是 `node tools/probe-web.mjs`；它现在还校验 token URL 返回的 303 `Location` 必须仍在本地 origin（`redirectIsLocal`，缺失/外部 origin 即 FAIL 且不回显目标），防止 WebView 被导向外部站点后注入原生能力；对应 npm 单测 31 项（含重定向门禁 2 项）。与 SHIM 契约直接对应的是独立的 `test/shim-contract.test.mjs`（见第 4 节）。
 
 ### 1.2 渲染路径限制：关 DMABUF 时菜单表面的兜底（无契约变更）
 
@@ -151,7 +151,7 @@ grep -rn 'dshDesktop' runtime/node_modules/@deepseek-ai/dsh-client-ui-{file-drag
 grep -o 'globalThis\.[A-Za-z_$][A-Za-z0-9_$]*' runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Ciz7DZxv.js | sort -u
 ```
 
-> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 5/5 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 217 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
+> 说明（保留历史语境，附后续实测结果）：本次调研任务当时只写本文档、未运行上述测试命令；`test/shim-contract.test.mjs` 由另一轨道同时落盘，本文对其断言的引用基于直接读取源码（见 `test/shim-contract.test.mjs:65-139`）。此后 verifier 已实测全绿：`node --test` 8/8 通过、`npm run test:contract` 契约守卫 13 checks 0 FAIL、`cargo test` 221 passed；不再是「以 verifier 实际执行结果为准」的待验证状态。
 
 ## 5. dshDesktop v1 决策：明确不实现
 
